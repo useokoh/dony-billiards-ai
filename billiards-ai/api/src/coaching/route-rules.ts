@@ -20,8 +20,9 @@ import {
   type TipHeight,
 } from './coaching.types.js';
 import {
-  planAlternatives,
-  planRoute,
+  candidatePlans,
+  matchesOrder,
+  routeKey,
   type PlannedRoute,
 } from './route-geometry.js';
 import { loadRouteModel, type RouteModel } from './route-model.js';
@@ -101,13 +102,6 @@ const DIRECTION_LABEL = {
   clockwise: '화면 기준 시계 방향',
   counterclockwise: '화면 기준 반시계 방향',
 };
-const THICKNESS_ORDER: Thickness[] = ['1/4', '1/2', '3/4', 'full'];
-
-/** 두께를 한 단계 얇게(-1)/두껍게(+1) */
-function shiftThickness(t: Thickness, shift: number): Thickness {
-  const i = THICKNESS_ORDER.indexOf(t) + shift;
-  return THICKNESS_ORDER[Math.max(0, Math.min(THICKNESS_ORDER.length - 1, i))];
-}
 
 /** 라벨까지 채운 ExecutionHint를 만든다. 권장값이므로 basis/verified는 고정 */
 export function makeHint(spec: HintSpec, plan?: PlannedRoute): ExecutionHint {
@@ -162,8 +156,6 @@ interface Template {
   description: string;
   rationale: string;
   hint: HintSpec;
-  /** 배치로 계산한 두께에서 몇 단계 얇게(-1)/두껍게(+1) 할지 (변형 경로 구분용) */
-  thicknessShift?: number;
 }
 
 const L: RailKind = 'long';
@@ -186,7 +178,6 @@ const basic = (description: string, rationale: string): Template => ({
 
 /** 중급 비교용: 첫 목적구를 얇게 + 회전을 더해 길이를 확보 */
 const thinWithSpin = (description: string, rationale: string): Template => ({
-  thicknessShift: -1,
   difficulty: 'intermediate',
   description,
   rationale,
@@ -202,7 +193,6 @@ const thinWithSpin = (description: string, rationale: string): Template => ({
 
 /** 중급 비교용: 회전을 빼고 두께로 각도를 맞춤 */
 const thickNoSpin = (description: string, rationale: string): Template => ({
-  thicknessShift: 1,
   difficulty: 'intermediate',
   description,
   rationale,
@@ -401,6 +391,8 @@ function geometryFields(plan: PlannedRoute, model: RouteModel) {
     expectedSuccess: plan.expectedSuccess,
     comparison: {
       windowDeg: plan.windowDeg,
+      directionWindowDeg: plan.directionWindowDeg,
+      referenceSuccess: plan.referenceSuccess,
       cutDeg: plan.cutDeg,
       pathLengthM: Math.round(plan.lengthPx * (2.84 / 1480) * 10) / 10,
       nextLayout: plan.nextLayout,
@@ -409,54 +401,173 @@ function geometryFields(plan: PlannedRoute, model: RouteModel) {
 }
 
 function planSentence(plan: PlannedRoute): string {
-  return `샷 시작 배치로 계산하면 ${BALL_LABEL[plan.firstObjectBall]}을 자르는 각 약 ${plan.cutDeg}°(허용 폭 ${plan.windowDeg}°)로 맞혀 수구가 약 ${plan.deflectionDeg}° 꺾여 ${BALL_LABEL[plan.secondObjectBall]}으로 갑니다.`;
+  return `샷 시작 배치로 계산하면 ${BALL_LABEL[plan.firstObjectBall]}을 자르는 각 약 ${plan.cutDeg}°로 맞혀 수구가 약 ${plan.deflectionDeg}° 꺾여 ${BALL_LABEL[plan.secondObjectBall]}으로 갑니다. 충돌 뒤 수구 방향이 ±${plan.directionWindowDeg / 2}° 안에서 틀어져도 득점이 됩니다.`;
 }
 
-/** 고급: 쿠션 순서·첫 목적구가 다른 후보를 기대 성공률로 비교 (템플릿 대신 계산 결과로 만든다) */
-function advancedRoutes(
+/** 다음 배치 가산점: 고급은 득점 뒤 배치까지 고려한다 (Docs/기술스택.md 3.4) */
+const LAYOUT_BONUS = { good: 0.05, normal: 0, hard: -0.05 } as const;
+
+/**
+ * 경로 자체의 난이도: 초급 실행 오차로 잰 성공률(공통 쉬움 지수)로 정한다.
+ * 기준 0.35 / 0.25는 실제 실패 샷 107개의 후보 552개 분포를 셋으로 나눈 지점이다 (2026-11-09).
+ */
+export function difficultyFromSuccess(referenceSuccess: number): CoachingLevel {
+  if (referenceSuccess >= 0.35) return 'beginner';
+  if (referenceSuccess >= 0.25) return 'intermediate';
+  return 'advanced';
+}
+
+const kindOf = (r: string): RailKind =>
+  r === 'top' || r === 'bottom' ? 'long' : 'short';
+
+const TIE = 0.03; // 기대 성공률이 이만큼 안이면 같은 수준으로 본다 (시뮬레이션 잡음 수준)
+
+/**
+ * 가장 쉬운 경로: 4쿠션 이내 우선. 쉬움 지수 최고와 3%p 안인 후보 중에서
+ * 실패 유형의 기본 순서 → 방향 허용 폭이 넓은 것 → 쿠션이 적은 것 → 짧은 것 순으로 고른다.
+ */
+function easiest(
+  pool: PlannedRoute[],
+  preferOrder: RailKind[],
+): { plan: PlannedRoute; preferred: boolean } {
+  const short = pool.filter((p) => p.rails.length <= 4);
+  const use = short.length ? short : pool;
+  // 초급 실행 오차 기준 성공률(공통 쉬움 지수)로 고른다
+  const top = Math.max(...use.map((p) => p.referenceSuccess));
+  const near = use
+    .filter((p) => p.referenceSuccess >= top - TIE)
+    .sort(
+      (a, b) =>
+        b.directionWindowDeg - a.directionWindowDeg ||
+        a.rails.length - b.rails.length ||
+        a.lengthPx - b.lengthPx,
+    );
+  const pref = preferOrder.length
+    ? near.find((p) => matchesOrder(p.rails, preferOrder))
+    : undefined;
+  return pref
+    ? { plan: pref, preferred: true }
+    : { plan: near[0], preferred: false };
+}
+
+function computedRoute(
+  plan: PlannedRoute,
+  rank: number,
+  rationale: string,
+  model: RouteModel,
+  noSpin: boolean,
+): RecommendedRouteDto {
+  const order = plan.rails.map(kindOf);
+  const spec: HintSpec = {
+    thickness: plan.thickness,
+    order,
+    side: noSpin ? 'none' : 'right', // 실제 방향은 makeHint가 진행 방향으로 정한다
+    tip: 'center',
+    amount: noSpin ? 'none' : plan.directionWindowDeg >= 6 ? 'light' : 'medium',
+    strength: plan.strength,
+  };
+  return {
+    rank,
+    difficulty: difficultyFromSuccess(plan.referenceSuccess),
+    description: `${BALL_LABEL[plan.firstObjectBall]} 먼저 → ${order.map((k) => RAIL_ORDER_LABEL[k]).join('·')} ${order.length}쿠션 → ${BALL_LABEL[plan.secondObjectBall]}`,
+    cushionCount: order.length,
+    source: 'rule_template' as const,
+    rationale,
+    executionHint: makeHint(spec, plan),
+    ...geometryFields(plan, model),
+  };
+}
+
+const FAILURE_FOCUS: Record<FailureKind, string> = {
+  no_first_hit:
+    '첫 목적구를 놓친 샷이라 겨냥이 쉬운(허용 폭이 넓은) 경로를 골랐습니다.',
+  no_second_hit:
+    '두 번째 목적구를 놓친 샷이라 마지막 쿠션에서 여유가 큰 경로를 골랐습니다.',
+  not_enough_cushions: '쿠션이 모자랐던 샷이라 짧고 단순한 경로를 골랐습니다.',
+  unspecified: '이 배치에서 가장 쉬운 경로를 골랐습니다.',
+};
+
+/**
+ * 배치로 계산한 경로. 모든 난이도가 같은 후보 모음에서 고른다.
+ * - 초급: 4쿠션 이내에서 가장 쉬운 경로 1개
+ * - 중급: 가장 쉬운 경로 + 첫 목적구나 쿠션 순서가 다른 비교 경로
+ * - 고급: 기대 성공률 + 다음 배치 가산점 순으로 3개
+ * 후보가 없으면 null (규칙 예시로 대신한다)
+ */
+function computedRoutes(
+  failure: FailureKind,
+  level: CoachingLevel,
   geometry: ShotGeometry,
   model: RouteModel,
-): RecommendedRouteDto[] {
-  return planAlternatives(
-    geometry.layout,
-    geometry.cueBall,
-    model,
-    'advanced',
-  ).map((plan, i) => {
-    const order = plan.rails.map(
-      (r) => (r === 'top' || r === 'bottom' ? 'long' : 'short') as RailKind,
-    );
-    const difficulty: CoachingLevel =
-      plan.expectedSuccess >= 0.5
-        ? 'beginner'
-        : plan.expectedSuccess >= 0.25
-          ? 'intermediate'
-          : 'advanced';
-    const spec: HintSpec = {
-      thickness: plan.thickness,
-      order,
-      side: 'right',
-      tip: 'center',
-      amount: plan.windowDeg >= 3 ? 'light' : 'medium',
-      strength: plan.strength,
-    };
-    return {
-      rank: i + 1,
-      difficulty,
-      description: `${BALL_LABEL[plan.firstObjectBall]} 먼저 → ${order.map((k) => RAIL_ORDER_LABEL[k]).join('·')} ${order.length}쿠션 → ${BALL_LABEL[plan.secondObjectBall]}`,
-      cushionCount: order.length,
-      source: 'rule_template' as const,
-      rationale: `${planSentence(plan)} 기대 성공률 ${Math.round(plan.expectedSuccess * 100)}%, 다음 배치는 ${RATING_LABEL[plan.nextLayout.rating]}(세 공 최대 거리 ${plan.nextLayout.spreadM}m) 예상입니다.`,
-      executionHint: makeHint(spec, plan),
-      ...geometryFields(plan, model),
-    };
-  });
+): RecommendedRouteDto[] | null {
+  const pool = candidatePlans(geometry.layout, geometry.cueBall, model, level);
+  if (!pool.length) return null;
+  const noSpin = failure === 'no_first_hit' && level === 'beginner';
+  const preferOrder = TEMPLATES[failure][level][0].hint.order;
+
+  if (level === 'advanced') {
+    return [...pool]
+      .sort(
+        (a, b) =>
+          b.expectedSuccess +
+          LAYOUT_BONUS[b.nextLayout.rating] -
+          (a.expectedSuccess + LAYOUT_BONUS[a.nextLayout.rating]),
+      )
+      .slice(0, 3)
+      .map((p, i) =>
+        computedRoute(
+          p,
+          i + 1,
+          `${planSentence(p)} 기대 성공률 ${Math.round(p.expectedSuccess * 100)}%, 다음 배치는 ${RATING_LABEL[p.nextLayout.rating]}(세 공 최대 거리 ${p.nextLayout.spreadM}m) 예상입니다.`,
+          model,
+          false,
+        ),
+      );
+  }
+
+  const { plan: first, preferred } = easiest(pool, preferOrder);
+  const lead = preferred
+    ? `${FAILURE_FOCUS[failure]} 실패 원인에 맞는 기본 쿠션 순서이면서 가장 쉬운 쪽입니다.`
+    : FAILURE_FOCUS[failure];
+  // 초급인데 이 배치에 초급용(쉬움 지수 0.35 이상) 경로가 없으면 그 사실을 밝힌다
+  const noEasy =
+    level === 'beginner' &&
+    difficultyFromSuccess(first.referenceSuccess) !== 'beginner'
+      ? ' 이 배치에는 초급용 경로가 없어, 계산한 후보 중 가장 쉬운 경로입니다. 무리하지 말고 다음 배치를 위한 안전한 선택도 고려하세요.'
+      : '';
+  const routes = [
+    computedRoute(
+      first,
+      1,
+      `${lead}${noEasy} ${planSentence(first)}`,
+      model,
+      noSpin,
+    ),
+  ];
+  if (level === 'intermediate') {
+    const others = pool
+      .filter((p) => routeKey(p) !== routeKey(first))
+      .sort((a, b) => b.referenceSuccess - a.referenceSuccess);
+    const other = others.find((p) => p.rails.length <= 4) ?? others[0];
+    if (other) {
+      routes.push(
+        computedRoute(
+          other,
+          2,
+          `비교 경로: 1순위와 첫 목적구 또는 쿠션 순서가 다릅니다. 방향 허용 폭 ${other.directionWindowDeg}°(1순위 ${first.directionWindowDeg}°), 기대 성공률 ${Math.round(other.expectedSuccess * 100)}%(1순위 ${Math.round(first.expectedSuccess * 100)}%). ${planSentence(other)}`,
+          model,
+          false,
+        ),
+      );
+    }
+  }
+  return routes;
 }
 
 /**
  * 실패 유형과 난이도에 맞는 추천 경로 (rank 1부터).
- * 샷 시작 배치(geometry)가 있으면 실측 보정 모델로 굴려 좌표·첫 목적구·두께·방향·강약·기대 성공률을 채운다.
- * 고급은 배치가 있으면 계산한 후보끼리 비교하고, 없으면 규칙 예시를 쓴다.
+ * 샷 시작 배치(geometry)가 있으면 실측 보정 모델로 굴린 후보 중에서 난이도 기준으로 고르고,
+ * 배치가 없거나 득점 경로가 없으면 실패 유형별 규칙 예시를 준다.
  */
 export function buildRuleRoutes(
   failure: FailureKind,
@@ -464,63 +575,24 @@ export function buildRuleRoutes(
   geometry?: ShotGeometry | null,
   model: RouteModel = loadRouteModel(),
 ): RecommendedRouteDto[] {
-  if (level === 'advanced' && geometry) {
-    const routes = advancedRoutes(geometry, model);
-    if (routes.length > 0) return routes;
+  if (geometry) {
+    const routes = computedRoutes(failure, level, geometry, model);
+    if (routes) return routes;
   }
-  return TEMPLATES[failure][level].map((t, i) => {
-    let plan = geometry
-      ? planRoute(geometry.layout, geometry.cueBall, t.hint.order, model, level)
-      : null;
-    // 이 배치에서 템플릿 순서로 득점 경로가 없으면, 4쿠션 이내에서 기대 성공률이 가장 높은 다른 순서를 권한다
-    let replaced = false;
-    if (!plan && geometry && t.hint.order.length > 0) {
-      plan = planRoute(geometry.layout, geometry.cueBall, [], model, level, 4);
-      replaced = plan !== null;
-    }
-    const order: RailKind[] =
-      plan && replaced
-        ? plan.rails.map((r) =>
-            r === 'top' || r === 'bottom' ? 'long' : 'short',
-          )
-        : t.hint.order;
-    const spec = plan
-      ? {
-          ...t.hint,
-          order,
-          thickness: shiftThickness(plan.thickness, t.thicknessShift ?? 0),
-        }
-      : t.hint;
-    const templateOrder = t.hint.order
-      .map((k) => RAIL_ORDER_LABEL[k])
-      .join('·');
-    const base = {
-      rank: i + 1,
-      difficulty: t.difficulty,
-      description:
-        plan && replaced
-          ? `${BALL_LABEL[plan.firstObjectBall]} 먼저 → ${order.map((k) => RAIL_ORDER_LABEL[k]).join('·')} ${order.length}쿠션 → ${BALL_LABEL[plan.secondObjectBall]}`
-          : t.description,
-      cushionCount: order.length,
-      source: 'rule_template' as const,
-      rationale: plan
-        ? replaced
-          ? `이 배치에서는 ${templateOrder} 순서로 4쿠션 안에 득점하는 경로가 계산되지 않아 대신 이 경로를 권합니다. ${planSentence(plan)}`
-          : `${t.rationale} ${planSentence(plan)}`
-        : t.rationale,
-      executionHint: makeHint(spec, plan ?? undefined),
-    };
-    return plan
-      ? { ...base, ...geometryFields(plan, model) }
-      : {
-          ...base,
-          points: null,
-          pointsBasis: null,
-          confidence: null,
-          expectedSuccess: null,
-          comparison: null,
-        };
-  });
+  return TEMPLATES[failure][level].map((t, i) => ({
+    rank: i + 1,
+    difficulty: t.difficulty,
+    description: t.description,
+    cushionCount: t.hint.order.length,
+    source: 'rule_template' as const,
+    rationale: t.rationale,
+    executionHint: makeHint(t.hint),
+    points: null,
+    pointsBasis: null,
+    confidence: null,
+    expectedSuccess: null,
+    comparison: null,
+  }));
 }
 
 // ── 피드백 문장 ───────────────────────────────────────────
@@ -583,7 +655,7 @@ export function buildFeedbackItems(
     const compare = routes
       .map((r) =>
         r.expectedSuccess !== null && r.comparison
-          ? `${r.rank}순위 ${r.description}: 기대 성공률 ${Math.round(r.expectedSuccess * 100)}%, 허용 폭 ${r.comparison.windowDeg}°, 다음 배치 ${RATING_LABEL[r.comparison.nextLayout.rating]}`
+          ? `${r.rank}순위 ${r.description}: 기대 성공률 ${Math.round(r.expectedSuccess * 100)}%, 방향 허용 폭 ${r.comparison.directionWindowDeg}°, 다음 배치 ${RATING_LABEL[r.comparison.nextLayout.rating]}`
           : `${r.rank}순위 ${r.description}`,
       )
       .join(' / ');

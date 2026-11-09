@@ -114,6 +114,8 @@ export type RecommendedRoute = {
   expectedSuccess: number | null; // 난이도별 실행 오차 가정을 넣어 굴려 본 득점 비율
   comparison: {
     windowDeg: number;
+    directionWindowDeg: number; // 충돌 뒤 수구 방향 허용 폭
+    referenceSuccess: number; // 초급 기준 성공률: 레벨과 무관한 쉬움 지수 (difficulty의 근거)
     cutDeg: number;
     pathLengthM: number;
     nextLayout: { cueEnd: Point; objectBallEnd: Point; secondBall: Point; spreadM: number; rating: "good" | "normal" | "hard" };

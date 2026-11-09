@@ -1,5 +1,6 @@
 import {
   bounce,
+  candidatePlans,
   planAlternatives,
   planRoute,
   simulate,
@@ -7,7 +8,7 @@ import {
   thicknessBucket,
   turnDirection,
 } from './route-geometry.js';
-import { buildRuleRoutes } from './route-rules.js';
+import { buildRuleRoutes, difficultyFromSuccess } from './route-rules.js';
 import { DEFAULT_ROUTE_MODEL as model } from './route-model.default.js';
 import type { Point } from '../trajectory/trajectory.js';
 
@@ -176,10 +177,6 @@ describe('buildRuleRoutes + 배치', () => {
     ).toBe(true);
     expect(routes[0].description).toMatch(/먼저 →/);
   });
-  it('무회전 템플릿은 방향이 정해져도 회전을 넣지 않는다', () => {
-    const [top] = buildRuleRoutes('no_first_hit', 'beginner', geometry, model);
-    expect(top.executionHint!.spin.side).toBe('none');
-  });
   it('배치가 없으면 좌표·기대 성공률 null', () => {
     const [top] = buildRuleRoutes(
       'not_enough_cushions',
@@ -193,23 +190,74 @@ describe('buildRuleRoutes + 배치', () => {
   });
 });
 
-describe('템플릿 순서로 경로가 없을 때', () => {
-  it('4쿠션 이내 다른 순서로 대신 권하고 이유를 밝힌다', () => {
-    const geometry = { layout, cueBall: 'white' as const };
+describe('난이도별 경로 고르기 (모두 같은 후보 모음에서)', () => {
+  const geometry = { layout, cueBall: 'white' as const };
+  const key = (r: { description: string }) => r.description;
+
+  it('초급 1순위는 4쿠션 이내 후보 중 가장 쉽다 (기본 순서 선호는 3%p 안에서만)', () => {
     const [top] = buildRuleRoutes(
       'not_enough_cushions',
       'beginner',
       geometry,
       model,
     );
-    // 이 배치는 장·단·장 4쿠션 이내 득점 경로가 없다 (planRoute 결과로 확인)
-    expect(
-      planRoute(layout, 'white', ['long', 'short', 'long'], model, 'beginner'),
-    ).toBeNull();
-    expect(top.points).not.toBeNull();
+    const pool = candidatePlans(layout, 'white', model, 'beginner').filter(
+      (p) => p.rails.length <= 4,
+    );
+    expect(top.expectedSuccess).not.toBeNull();
     expect(top.cushionCount).toBeLessThanOrEqual(4);
-    expect(top.description).toMatch(/먼저 →/);
-    expect(top.rationale).toContain('대신');
-    expect(top.executionHint!.cushionPlan.order).toHaveLength(top.cushionCount);
+    for (const p of pool)
+      expect(top.expectedSuccess!).toBeGreaterThanOrEqual(
+        p.expectedSuccess - 0.03,
+      );
+  });
+
+  it('중급 2순위는 1순위와 다른 경로', () => {
+    const routes = buildRuleRoutes(
+      'not_enough_cushions',
+      'intermediate',
+      geometry,
+      model,
+    );
+    if (routes.length === 2) expect(key(routes[0])).not.toBe(key(routes[1]));
+    expect(routes[0].rationale.length).toBeGreaterThan(0);
+  });
+
+  it('경로 난이도는 공통 쉬움 지수(초급 기준 성공률)로 정한다', () => {
+    expect(difficultyFromSuccess(0.4)).toBe('beginner');
+    expect(difficultyFromSuccess(0.3)).toBe('intermediate');
+    expect(difficultyFromSuccess(0.1)).toBe('advanced');
+  });
+
+  it('모든 레벨에서 같은 경로는 같은 난이도 표시 (선택 기준과 표시 기준이 같다)', () => {
+    const label = new Map<string, string>();
+    for (const lv of ['beginner', 'intermediate', 'advanced'] as const) {
+      for (const r of buildRuleRoutes('no_second_hit', lv, geometry, model)) {
+        const prev = label.get(r.description);
+        if (prev) expect(r.difficulty).toBe(prev);
+        label.set(r.description, r.difficulty);
+      }
+    }
+  });
+
+  it('초급 1순위의 쉬움 지수가 고급 후보들보다 낮지 않다', () => {
+    const [beg] = buildRuleRoutes('no_second_hit', 'beginner', geometry, model);
+    for (const r of buildRuleRoutes(
+      'no_second_hit',
+      'advanced',
+      geometry,
+      model,
+    )) {
+      if (r.cushionCount <= 4) {
+        expect(beg.comparison!.referenceSuccess).toBeGreaterThanOrEqual(
+          r.comparison!.referenceSuccess - 0.03,
+        );
+      }
+    }
+  });
+
+  it('첫 목적구를 놓친 초급 샷은 회전 없이 안내', () => {
+    const [top] = buildRuleRoutes('no_first_hit', 'beginner', geometry, model);
+    expect(top.executionHint!.spin.side).toBe('none');
   });
 });

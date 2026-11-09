@@ -88,6 +88,9 @@ export interface RecommendedRouteDto {
 
 export interface RouteComparison {
   windowDeg: number; // 득점이 되는 두께(자르는 각) 허용 폭, 도
+  directionWindowDeg: number; // 충돌 뒤 수구 방향 허용 폭, 도
+  /** 초급 실행 오차로 잰 성공률: 난이도와 상관없는 공통 쉬움 지수 (difficulty의 근거) */
+  referenceSuccess: number;
   cutDeg: number; // 겨냥할 자르는 각 (0 = 정면)
   pathLengthM: number; // 첫 목적구 뒤 수구가 굴러가는 거리 (m)
   /** 다음 배치 추정: 1적구는 실측 이동 거리 중앙값, 수구는 두 번째 목적구 접점에서 멈춘다고 가정 */

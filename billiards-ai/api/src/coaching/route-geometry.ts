@@ -32,7 +32,9 @@ const MAX_LEN = 6000; // 수구가 굴러갈 최대 거리(px, 장쿠션 약 4�
 const MAX_CUSHIONS = 6;
 const CUT_STEP = 0.5;
 const MAX_CUT = 80;
-const SAMPLES = 160;
+const SAMPLES = 400; // 기대 성공률 시뮬레이션 횟수 (표준오차 약 ±2.5%p)
+const DIR_STEP = 0.5; // 방향 허용 폭을 잴 간격(도)
+const DIR_MAX = 20;
 const ALT_MAX_CUSHIONS = 5; // 비교 후보의 최대 쿠션 수 (두 번째 목적구 전)
 
 /** 실행 오차 가정 (표준편차, 도). 측정값이 아니라 난이도별 가정이다 */
@@ -305,10 +307,13 @@ export interface PlannedRoute {
   thickness: Thickness;
   thicknessFraction: number;
   windowDeg: number; // 득점이 되는 자르는 각 허용 폭
+  directionWindowDeg: number; // 충돌 뒤 수구 방향 허용 폭 (쉬움의 기준)
   direction: 'clockwise' | 'counterclockwise' | null;
   lengthPx: number;
   strength: Strength;
-  expectedSuccess: number; // 0~1, 실행 오차 가정을 넣은 몬테카를로
+  expectedSuccess: number; // 0~1, 요청 난이도의 실행 오차 가정을 넣은 몬테카를로
+  /** 0~1, 초급 실행 오차로 잰 성공률. 난이도와 상관없는 공통 "쉬움" 지수 (경로끼리 공정하게 비교) */
+  referenceSuccess: number;
   nextLayout: NextLayout;
 }
 
@@ -367,7 +372,13 @@ function expectedSuccess(
   const O = toPx(layout[w.first]);
   const T = toPx(layout[w.second]);
   const sd = EXECUTION_SD[level];
-  const seed = Math.round((C[0] + O[0] * 3 + T[1] * 7 + aim * 11) * 1000);
+  // 같은 샷의 모든 후보에 같은 난수열을 쓴다 (짝지은 비교: 후보 사이 차이의 잡음이 줄어든다)
+  const seed = Math.round(
+    (toPx(layout.white)[0] +
+      toPx(layout.yellow)[1] * 3 +
+      toPx(layout.red)[0] * 7) *
+      1000,
+  );
   const r = rng(seed);
   let ok = 0;
   for (let i = 0; i < SAMPLES; i++) {
@@ -382,6 +393,34 @@ function expectedSuccess(
       ok += 1;
   }
   return Math.round((ok / SAMPLES) * 100) / 100;
+}
+
+/**
+ * 방향 허용 폭: 겨냥한 두께 그대로, 충돌 뒤 수구 방향만 ±로 틀었을 때 득점이 유지되는 범위(도).
+ * 실측상 꺾임 각은 두께에 둔감해서, 쉬움을 가르는 것은 두께 폭보다 이 값이다.
+ */
+function directionWindow(
+  layout: Record<BallName, Point>,
+  cueBall: BallName,
+  w: Window,
+  cut: number,
+  model: RouteModel,
+): number {
+  const C = toPx(layout[cueBall]);
+  const O = toPx(layout[w.first]);
+  const T = toPx(layout[w.second]);
+  const scores = (off: number) => {
+    const s = strike(C, O, T, cut, model, { deflection: off, bounce: () => 0 });
+    return s.sim.cushionsBeforeHit !== null && s.sim.cushionsBeforeHit >= 3;
+  };
+  let width = 0;
+  for (const sign of [1, -1]) {
+    for (let off = DIR_STEP; off <= DIR_MAX; off += DIR_STEP) {
+      if (!scores(sign * off)) break;
+      width += DIR_STEP;
+    }
+  }
+  return scores(0) ? width + DIR_STEP : 0;
 }
 
 function toPlan(
@@ -404,6 +443,11 @@ function toPlan(
   const spread =
     Math.max(len(sub(obEnd, cueEnd)), len(sub(obEnd, T)), len(sub(cueEnd, T))) *
     PX_TO_M;
+  const expected = expectedSuccess(layout, cueBall, w, mid.cut, model, level);
+  const reference =
+    level === 'beginner'
+      ? expected
+      : expectedSuccess(layout, cueBall, w, mid.cut, model, 'beginner');
   return {
     points,
     rails: w.rails,
@@ -414,10 +458,12 @@ function toPlan(
     thickness: thicknessBucket(f),
     thicknessFraction: Math.round(f * 100) / 100,
     windowDeg: Math.round(w.shots.length * CUT_STEP * 10) / 10,
+    directionWindowDeg: directionWindow(layout, cueBall, w, mid.cut, model),
     direction: turnDirection(points),
     lengthPx: Math.round(mid.sim.length),
     strength: strengthForLength(mid.sim.length),
-    expectedSuccess: expectedSuccess(layout, cueBall, w, mid.cut, model, level),
+    expectedSuccess: expected,
+    referenceSuccess: reference,
     nextLayout: {
       cueEnd: toNorm(cueEnd),
       objectBallEnd: toNorm(obEnd),
@@ -483,9 +529,47 @@ export function planRoute(
   return chosen ? toPlan(layout, cueBall, chosen, model, level) : null;
 }
 
+/** 첫 목적구 + 쿠션 순서(장·단)가 같으면 같은 경로로 본다 */
+export function routeKey(
+  p: Pick<PlannedRoute, 'firstObjectBall' | 'rails'>,
+): string {
+  return `${p.firstObjectBall}:${p.rails.map((r) => RAIL_KIND[r]).join('-')}`;
+}
+
 /**
- * 고급 비교용: 서로 다른 (첫 목적구 × 쿠션 순서) 후보를 기대 성공률 순으로 count개.
+ * 후보 모음: 서로 다른 (첫 목적구 × 쿠션 순서) 경로를, 요청 난이도의 실행 오차로 평가해 기대 성공률 순으로.
+ * 모든 난이도가 같은 모음에서 고른다 (난이도마다 고르는 기준만 다르다).
  */
+export function candidatePlans(
+  layout: Record<BallName, Point>,
+  cueBall: BallName,
+  model: RouteModel,
+  level: CoachingLevel,
+  maxCushions = ALT_MAX_CUSHIONS,
+  limit = 10,
+): PlannedRoute[] {
+  const ws = scoringWindows(layout, cueBall, model).filter(
+    (w) => w.rails.length <= maxCushions,
+  );
+  const byKey = new Map<string, Window>();
+  for (const w of ws) {
+    const key = routeKey({ firstObjectBall: w.first, rails: w.rails });
+    const prev = byKey.get(key);
+    if (!prev || w.shots.length > prev.shots.length) byKey.set(key, w);
+  }
+  return [...byKey.values()]
+    .sort((a, b) => b.shots.length - a.shots.length)
+    .slice(0, limit)
+    .map((w) => toPlan(layout, cueBall, w, model, level))
+    .sort(
+      (a, b) =>
+        b.expectedSuccess - a.expectedSuccess ||
+        b.directionWindowDeg - a.directionWindowDeg ||
+        a.rails.length - b.rails.length,
+    );
+}
+
+/** 고급 비교용: 후보 모음의 앞에서 count개 */
 export function planAlternatives(
   layout: Record<BallName, Point>,
   cueBall: BallName,
@@ -493,26 +577,8 @@ export function planAlternatives(
   level: CoachingLevel,
   count = 3,
 ): PlannedRoute[] {
-  const ws = scoringWindows(layout, cueBall, model).filter(
-    (w) => w.rails.length <= ALT_MAX_CUSHIONS,
-  );
-  // 같은 첫 목적구 + 같은 쿠션 순서(장·단)는 하나로 (가장 넓은 구간)
-  const byKey = new Map<string, Window>();
-  for (const w of ws) {
-    const key = `${w.first}:${w.rails.map((r) => RAIL_KIND[r]).join('-')}:${w.rails[0]}`;
-    const prev = byKey.get(key);
-    if (!prev || w.shots.length > prev.shots.length) byKey.set(key, w);
-  }
-  const candidates = [...byKey.values()]
-    .sort((a, b) => b.shots.length - a.shots.length)
-    .slice(0, 8)
-    .map((w) => toPlan(layout, cueBall, w, model, level));
-  return candidates
-    .sort(
-      (a, b) =>
-        b.expectedSuccess - a.expectedSuccess || b.windowDeg - a.windowDeg,
-    )
-    .slice(0, count);
+  return candidatePlans(layout, cueBall, model, level).slice(0, count);
 }
 
+export { matchesOrder };
 export { simulate as simulateCue, PX_TO_M };

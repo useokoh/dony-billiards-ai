@@ -15,7 +15,8 @@ const CHOICES: { value: Choice; label: string }[] = [
   { value: "intermediate", label: "중급 27" },
   { value: "advanced", label: "고급 27+" },
 ];
-const DIFFICULTY: Record<CoachingLevel, string> = { beginner: "초급", intermediate: "중급", advanced: "고급" };
+// 경로 자체의 난이도 (초급 기준 성공률로 정함: 0.35 이상 초급용, 0.25 이상 중급용)
+const DIFFICULTY: Record<CoachingLevel, string> = { beginner: "초급용", intermediate: "중급용", advanced: "고급용" };
 const LAYOUT_TEXT = { good: "모여 있음", normal: "보통", hard: "흩어짐" } as const;
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const SOURCE_TEXT: Record<RouteResponse["levelSource"], string> = {
@@ -114,7 +115,16 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
                   <span className={styles.routeHead}>
                     <span className={styles.routeRank}>{r.rank}</span>
                     <span className={styles.routeTitle}>{r.description}</span>
-                    <span className={styles.tag_muted}>{DIFFICULTY[r.difficulty]}</span>
+                    <span
+                      className={styles.tag_muted}
+                      title={
+                        r.comparison
+                          ? `초급 기준 성공률 ${pct(r.comparison.referenceSuccess)} (레벨과 상관없는 쉬움 지수)`
+                          : undefined
+                      }
+                    >
+                      {DIFFICULTY[r.difficulty]}
+                    </span>
                   </span>
                   {r.expectedSuccess !== null && r.comparison && (
                     <span className={styles.routeStats}>
@@ -122,7 +132,7 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
                         <b>{pct(r.expectedSuccess)}</b>기대 성공률
                       </span>
                       <span>
-                        <b>{r.comparison.windowDeg}°</b>두께 허용 폭
+                        <b>±{r.comparison.directionWindowDeg / 2}°</b>방향 허용 폭
                       </span>
                       <span>
                         <b>{LAYOUT_TEXT[r.comparison.nextLayout.rating]}</b>다음 배치
@@ -146,7 +156,7 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
       {current && (
         <p className={styles.disclaimer}>
           {current.route.disclaimer} 경로는 이 당구대의 실제 경기 영상에서 잰 쿠션 반사·충돌 꺾임으로 굴려 본 것입니다.
-          기대 성공률은 난이도별 실행 오차를 가정한 값이고, 다음 배치는 1적구 이동 거리 실측 중앙값으로 추정한 참고값입니다.
+          기대 성공률은 고른 난이도의 실행 오차를 가정한 값이고, 경로의 초급용·중급용·고급용 표시는 레벨과 상관없이 초급 기준 성공률로 정합니다. 다음 배치는 1적구 이동 거리 실측 중앙값으로 추정한 참고값입니다.
         </p>
       )}
     </div>
