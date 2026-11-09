@@ -14,6 +14,7 @@ import numpy as np
 from analyzer.calibrate import TABLE_H, TABLE_W
 from analyzer.detect import BALL_RADIUS
 from analyzer.innings import assign_innings
+from analyzer.judge import judge_shots, summary
 
 BALLS = ("white", "yellow", "red")
 CUE_BALLS = ("white", "yellow")
@@ -265,12 +266,12 @@ def main() -> None:
     with np.load(track) as data:
         shots, others = analyze_track(data["times"], data["positions"], data["moves"], data["estimated"])
 
-    shots = assign_innings(shots)
+    shots = judge_shots(assign_innings(shots))  # ⑨ 득점 자동 확정
     agreement = turn_agreement(shots)
     args.out.mkdir(parents=True, exist_ok=True)
     target = args.out / f"{args.video.stem}.json"
     target.write_text(
-        json.dumps({"video": args.video.name, "shots": shots, "other_moves": others, "turn_agreement": agreement}, ensure_ascii=False, indent=1),
+        json.dumps({"video": args.video.name, "shots": shots, "other_moves": others, "turn_agreement": agreement, "judge_summary": summary(shots)}, ensure_ascii=False, indent=1),
         encoding="utf-8",
     )
     total = sum(agreement.values())
@@ -278,6 +279,7 @@ def main() -> None:
     print(f"샷 {len(shots)}개, 샷이 아닌 구간 {len(others)}개")
     print(f"평균 쿠션 {np.mean([s['cushion_count'] for s in shots]):.1f}회, 득점 후보 {sum(s['score_candidate'] for s in shots)}개")
     print(f"다음 차례와 일치: {matched}/{total} ({matched / max(total, 1):.0%}) {agreement}")
+    print(f"득점 확정: {summary(shots)}")
     print(f"이닝 {max((s['inning_no'] for s in shots), default=0)}개")
     print(f"결과: {target}")
 
