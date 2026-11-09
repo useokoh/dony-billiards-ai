@@ -11,7 +11,7 @@ import {
 import { ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { resolveMediaPath, sendVideo } from '../media/media-file.js';
-import { parseConfirmBody, ShotsService } from './shots.service.js';
+import { parseShotPatch, ShotsService } from './shots.service.js';
 
 @ApiTags('샷')
 @Controller('shots')
@@ -43,17 +43,20 @@ export class ShotsController {
 
   @Patch(':id')
   @ApiOperation({
-    summary: '득점 인정(true)/불인정(false)/확인 취소(null), 점수 다시 계산',
+    summary:
+      '득점 인정(true)/불인정(false)/확인 취소(null)와 사람이 본 쫑 여부(kissObserved). 득점 확인 시 점수 다시 계산',
   })
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['scoreConfirmed'],
-      properties: { scoreConfirmed: { type: 'boolean', nullable: true } },
+      properties: {
+        scoreConfirmed: { type: 'boolean', nullable: true },
+        kissObserved: { type: 'boolean', nullable: true },
+      },
       example: { scoreConfirmed: true },
     },
   })
   confirm(@Param('id', ParseIntPipe) id: number, @Body() body: unknown) {
-    return this.shots.confirm(id, parseConfirmBody(body));
+    return this.shots.patch(id, parseShotPatch(body));
   }
 }

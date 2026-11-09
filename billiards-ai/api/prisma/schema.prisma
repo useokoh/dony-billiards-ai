@@ -142,6 +142,7 @@ model Shot {
   scoreConfirmed          Boolean?           @map("score_confirmed") // 사람이 확인한 결과 (null = 미확인)
   scoreBasis              String?            @map("score_basis") // 자동 확정 근거: agree(물리+차례 일치), turn(차례 신호 우선), physics(물리만)
   scoreConfidence         Float?             @map("score_confidence") // 자동 확정 신뢰도 0~1
+  kissObserved            Boolean?           @map("kiss_observed") // 사람이 영상으로 본 쫑 여부 (null = 확인 안 함). 쫑 예측 보정의 정답
   match                   Match              @relation(fields: [matchId], references: [id], onDelete: Cascade)
   inning                  Inning             @relation(fields: [inningId], references: [id], onDelete: Cascade)
   events                  ShotEvent[]

@@ -16,11 +16,12 @@ type Props = {
   shot: ShotDetail;
   saving: boolean;
   onConfirm: (value: boolean) => void;
+  onKiss: (value: boolean) => void;
   onPrev?: () => void;
   onNext?: () => void;
 };
 
-export default function ShotFeedback({ shot, saving, onConfirm, onPrev, onNext }: Props) {
+export default function ShotFeedback({ shot, saving, onConfirm, onKiss, onPrev, onNext }: Props) {
   const cushions = scoringCushions(shot);
   const first = shot.hitOrder?.[0] ?? null;
   // 자동 판정이 끝난 샷은 모두 사람이 바로잡을 수 있다
@@ -102,6 +103,33 @@ export default function ShotFeedback({ shot, saving, onConfirm, onPrev, onNext }
           </div>
         </div>
       )}
+
+      {/* 쫑 기록: 사람이 영상으로 본 값. 쫑 예측을 다시 맞출 정답으로 모은다 */}
+      <div className={styles.confirm}>
+        <p className={styles.confirmHint}>
+          수구가 1적구와 다시 부딪히거나 1적구가 2적구를 건드렸나요? (쫑) 기록이 쌓이면 쫑 예측을 다시 맞춥니다.
+        </p>
+        <div className={styles.confirmButtons}>
+          <button
+            type="button"
+            className={styles.reject}
+            aria-pressed={shot.kissObserved === true}
+            disabled={saving}
+            onClick={() => onKiss(true)}
+          >
+            쫑 났음
+          </button>
+          <button
+            type="button"
+            className={styles.accept}
+            aria-pressed={shot.kissObserved === false}
+            disabled={saving}
+            onClick={() => onKiss(false)}
+          >
+            쫑 없음
+          </button>
+        </div>
+      </div>
 
       <div className={styles.prevNext}>
         <button type="button" className={styles.linkButton} onClick={onPrev} disabled={!onPrev}>

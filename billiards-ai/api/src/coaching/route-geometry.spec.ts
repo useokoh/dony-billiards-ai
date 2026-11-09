@@ -3,13 +3,16 @@ import {
   candidatePlans,
   planAlternatives,
   planRoute,
+  requiredSpeed,
   simulate,
+  strengthForSpeed,
   strengthForLength,
   thicknessBucket,
   turnDirection,
 } from './route-geometry.js';
 import { buildRuleRoutes, difficultyFromSuccess } from './route-rules.js';
 import { DEFAULT_ROUTE_MODEL as model } from './route-model.default.js';
+import { routeConfidence } from './route-model.js';
 import type { Point } from '../trajectory/trajectory.js';
 
 describe('bounce', () => {
@@ -152,7 +155,7 @@ describe('buildRuleRoutes + 배치', () => {
       model,
     );
     if (top.points) {
-      expect(top.confidence).toBe(model.validation.path.table.reproduce_rate);
+      expect(top.confidence).toBe(routeConfidence(model));
       expect(top.expectedSuccess).not.toBeNull();
       expect(top.comparison!.windowDeg).toBeGreaterThan(0);
       const h = top.executionHint!;
@@ -259,5 +262,60 @@ describe('난이도별 경로 고르기 (모두 같은 후보 모음에서)', ()
   it('첫 목적구를 놓친 초급 샷은 회전 없이 안내', () => {
     const [top] = buildRuleRoutes('no_first_hit', 'beginner', geometry, model);
     expect(top.executionHint!.spin.side).toBe('none');
+  });
+});
+
+describe('1적구 예상 진행선', () => {
+  it('첫 목적구 위치에서 시작해 당구대 안에 있다', () => {
+    const r = planRoute(layout, 'white', [], model, 'intermediate')!;
+    expect(r.objectPath[0]).toEqual(layout[r.firstObjectBall]);
+    expect(r.objectPath.length).toBeGreaterThan(1);
+    for (const [x, y] of r.objectPath) {
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(x).toBeLessThanOrEqual(1);
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(y).toBeLessThanOrEqual(1);
+    }
+    expect(r.objectPath[r.objectPath.length - 1]).toEqual(
+      r.nextLayout.objectBallEnd,
+    );
+  });
+});
+
+describe('맞히는 쪽 (치는 사람 시점)', () => {
+  it('1적구가 오른쪽으로 밀려 나가는 경로는 1적구의 왼쪽을 맞힌다', () => {
+    // 수구 아래, 1적구 바로 위: 위쪽(-y) 진행. 1적구가 오른쪽(+x)으로 가는 후보를 찾는다
+    const lay = {
+      white: [0.5, 0.8] as Point,
+      yellow: [0.5, 0.5] as Point,
+      red: [0.9, 0.2] as Point,
+    };
+    for (const r of candidatePlans(lay, 'white', model, 'intermediate')) {
+      if (r.firstObjectBall !== 'yellow') continue;
+      const goesRight = r.objectPath[1][0] > r.objectPath[0][0];
+      expect(r.contactSide).toBe(goesRight ? 'left' : 'right');
+    }
+  });
+});
+
+describe('세기: 필요한 출발 속도 (실측 감속·쿠션 손실)', () => {
+  it('쿠션이 많고 길수록 더 빨라야 한다', () => {
+    const short = requiredSpeed([400, 400], model)!;
+    const long = requiredSpeed([700, 700, 700, 700, 700], model)!;
+    expect(long).toBeGreaterThan(short);
+    expect(requiredSpeed([], model)).toBe(3);
+  });
+  it('실제 샷들의 필요 속도 분포(같은 공식)로 약하게·보통·강하게', () => {
+    const [q33, q67] = model.kinematics!.required_speed_quantiles!;
+    expect(strengthForSpeed(q33 - 1, model)).toBe('soft');
+    expect(strengthForSpeed((q33 + q67) / 2, model)).toBe('medium');
+    expect(strengthForSpeed(q67 + 1, model)).toBe('firm');
+  });
+  it('계산된 경로는 필요한 출발 속도(m/s)를 함께 준다', () => {
+    const r = planRoute(layout, 'white', [], model, 'beginner')!;
+    expect(r.cueSpeedMps).toBeGreaterThan(0);
+    expect(r.strength).toBe(
+      strengthForSpeed(r.cueSpeedMps! / (2.84 / 1480) / 30, model),
+    );
   });
 });

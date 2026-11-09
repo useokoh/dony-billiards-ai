@@ -9,6 +9,7 @@ import {
   loadRouteModel,
   objectTravel,
   resetRouteModelCache,
+  routeConfidence,
 } from './route-model.js';
 
 describe('route-model', () => {
@@ -32,6 +33,16 @@ describe('route-model', () => {
     // 교차 검증에서 실측 표가 거울 반사보다 나아야 기본값으로 쓴다
     expect(m.validation.path.table.reproduce_rate).toBeGreaterThan(
       m.validation.path.mirror.reproduce_rate,
+    );
+    // 엄격 기준(실제 쿠션 순서)에서도 무작위 방향보다 훨씬, 이전 방식보다 나아야 한다
+    expect(m.validation.path.table.strict_rate!).toBeGreaterThan(
+      m.validation.path_random_baseline!.strict_rate * 5,
+    );
+    expect(m.validation.planner_e2e!.table.strict_rate!).toBeGreaterThan(
+      m.validation.planner_e2e!.mirror_stun.strict_rate!,
+    );
+    expect(routeConfidence(m)).toBe(
+      m.validation.planner_e2e!.table.strict_rate,
     );
   });
   it('파일이 없으면 기본값, 있으면 파일 값', () => {

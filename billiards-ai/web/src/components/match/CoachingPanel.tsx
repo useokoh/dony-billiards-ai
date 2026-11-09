@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { api, type CoachingLevel, type FeedbackResponse, type RecommendedRoute, type RouteResponse } from "@/lib/api";
 import { BALL_COLOR, BALL_NAME } from "@/lib/shot-text";
 import styles from "./match.module.css";
+import ShotDiagrams from "./ShotDiagrams";
 
 type Choice = "profile" | CoachingLevel;
 
@@ -139,12 +140,19 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
                       </span>
                     </span>
                   )}
+                  {r.executionHint && (
+                    <ShotDiagrams
+                      hint={r.executionHint}
+                      pathLengthM={r.comparison?.pathLengthM ?? null}
+                      cueSpeedMps={r.comparison?.cueSpeedMps ?? null}
+                    />
+                  )}
                   {r.executionHint && <HintTable hint={r.executionHint} />}
                   {r.rationale && <span className={styles.routeWhy}>{r.rationale}</span>}
                   <span className={styles.statSub}>
                     {r.points ? "그림에 점선으로 표시" : "공 배치로 계산할 수 없는 경로라 그림 없음"}
                     {r.comparison && ` · 수구 이동 약 ${r.comparison.pathLengthM}m`}
-                    {r.confidence !== null && ` · 경로 모델 재현율 ${pct(r.confidence)}`}
+                    {r.confidence !== null && ` · 경로 모델 전 구간 재현율 ${pct(r.confidence)}`}
                   </span>
                 </button>
               </li>
@@ -155,7 +163,7 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
 
       {current && (
         <p className={styles.disclaimer}>
-          {current.route.disclaimer} 경로는 이 당구대의 실제 경기 영상에서 잰 쿠션 반사·충돌 꺾임으로 굴려 본 것입니다.
+          {current.route.disclaimer} 경로는 이 당구대의 실제 경기 영상에서 잰 쿠션 반사·충돌 꺾임으로 굴려 본 것입니다. 쫑은 아직 예측하지 못합니다(실제 영상으로 시험한 결과 우연 수준). 그림의 1적구 예상 진행선(공 색 점선)을 보고 판단해 주세요.
           기대 성공률은 고른 난이도의 실행 오차를 가정한 값이고, 경로의 초급용·중급용·고급용 표시는 레벨과 상관없이 초급 기준 성공률로 정합니다. 다음 배치는 1적구 이동 거리 실측 중앙값으로 추정한 참고값입니다.
         </p>
       )}

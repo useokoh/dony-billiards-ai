@@ -60,6 +60,7 @@ export type Inning = {
 
 export type ShotDetail = ShotRow & {
   matchId: number;
+  kissObserved: boolean | null; // 사람이 본 쫑 여부 (null = 확인 안 함)
   inningNo: number;
   restSec: number | null;
   hitOrder: Ball[] | null;
@@ -95,7 +96,13 @@ export type CoachingLevel = "beginner" | "intermediate" | "advanced";
 export type ExecutionHint = {
   firstObjectBall: Ball | null;
   secondObjectBall: Ball | null;
-  firstBallThickness: { fraction: string; label: string; basis: "layout" | "template"; deflectionDeg: number | null };
+  firstBallThickness: {
+    fraction: string;
+    label: string;
+    basis: "layout" | "template";
+    deflectionDeg: number | null;
+    contactSide: "left" | "right" | null; // 치는 사람이 볼 때 1적구의 어느 쪽을 맞히는지
+  };
   cushionPlan: { order: ("long" | "short")[]; direction: "clockwise" | "counterclockwise" | null; label: string };
   spin: { side: string; tipHeight: string; amount: string; label: string };
   strength: { level: string; label: string };
@@ -118,6 +125,8 @@ export type RecommendedRoute = {
     referenceSuccess: number; // 초급 기준 성공률: 레벨과 무관한 쉬움 지수 (difficulty의 근거)
     cutDeg: number;
     pathLengthM: number;
+    cueSpeedMps: number | null; // 필요한 수구 출발 속도 (실측 감속·쿠션 손실로 계산, 세기의 근거)
+    objectPath: Point[]; // 1적구 예상 진행선 (참고)
     nextLayout: { cueEnd: Point; objectBallEnd: Point; secondBall: Point; spreadM: number; rating: "good" | "normal" | "hard" };
   } | null;
   source: "rule_template" | "stored";
@@ -190,6 +199,9 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scoreConfirmed }),
     }),
+  /** 사람이 영상으로 본 쫑 여부 기록 (true/false, null = 취소). 쫑 예측을 다시 맞출 정답으로 쓴다 */
+  markKiss: (id: number, kissObserved: boolean | null) =>
+    send<{ id: number; kissObserved: boolean | null }>(`/shots/${id}`, "PATCH", { kissObserved }),
   trajectory: (id: number) => request<Trajectory>(`/shots/${id}/trajectory`),
   /** level을 비우면 이 샷을 친 선수의 프로필(없으면 초급) 기준 */
   route: (id: number, level?: CoachingLevel) =>

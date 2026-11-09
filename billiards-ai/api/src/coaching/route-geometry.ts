@@ -254,7 +254,44 @@ export function thicknessBucket(f: number): Thickness {
   return 'full';
 }
 
-/** 경로 길이(장쿠션 길이 배수)로 권장 강약을 정하는 규칙 */
+const END_SPEED = 3; // 두 번째 목적구에 닿을 때 남아 있어야 할 속도 (px/프레임, 약 0.17m/s)
+const FPS = 30; // 측정한 영상의 프레임 수
+
+/**
+ * 필요한 수구 출발 속도(px/프레임): 두 번째 목적구에 닿을 때 END_SPEED가 남도록, 경로를 거꾸로 따라가며
+ * 구간마다 감속(v² += 2·감속·거리)과 쿠션마다 속도 손실(÷ 유지율)을 되돌린다. 실측 운동 값이 없으면 null
+ */
+export function requiredSpeed(
+  segmentLengths: number[],
+  model: RouteModel,
+): number | null {
+  const k = model.kinematics;
+  if (!k || !(k.decel > 0) || !(k.retention > 0)) return null;
+  let v = END_SPEED;
+  for (let i = segmentLengths.length - 1; i >= 0; i--) {
+    v = Math.sqrt(v * v + 2 * k.decel * segmentLengths[i]);
+    if (i > 0) v /= k.retention; // 구간 사이마다 쿠션 하나
+  }
+  return v;
+}
+
+/**
+ * 필요한 출발 속도를 "실제 샷들이 실제로 필요로 했던 속도"(같은 공식으로 계산) 분포의 하위·상위 1/3 지점과 비교해
+ * 세기를 정한다. 같은 계산법끼리 비교하므로 감속·쿠션 손실 추정의 치우침이 상쇄된다.
+ */
+export function strengthForSpeed(speed: number, model: RouteModel): Strength {
+  const k = model.kinematics!;
+  const [q33, q67] = k.required_speed_quantiles ?? k.cue_speed_quantiles;
+  if (speed < q33) return 'soft';
+  if (speed < q67) return 'medium';
+  return 'firm';
+}
+
+/** px/프레임 → m/s */
+export const speedToMps = (v: number) =>
+  Math.round(v * PX_TO_M * FPS * 10) / 10;
+
+/** (예비) 실측 운동 값이 없을 때: 경로 길이(장쿠션 길이 배수)로 권장 강약을 정하는 규칙 */
 export function strengthForLength(lengthPx: number): Strength {
   const lengths = lengthPx / W;
   if (lengths < 2.8) return 'soft';
@@ -270,11 +307,12 @@ export interface NextLayout {
   rating: 'good' | 'normal' | 'hard';
 }
 
-/** 1적구가 실측 이동 거리만큼 거울 반사로 굴러간 곳 (참고용 추정) */
-function objectEnd(O: V, dir: V, thickness: number, model: RouteModel): V {
+/** 1적구가 실측 이동 거리만큼 거울 반사로 굴러간 길 (꺾이는 점들, 마지막이 예상 정지 위치. 참고용 추정) */
+function objectPath(O: V, dir: V, thickness: number, model: RouteModel): V[] {
   let remaining = objectTravel(model, thickness) * H;
   let p = O;
   let d = unit(dir);
+  const path: V[] = [O];
   for (let i = 0; i < 8 && remaining > 0; i++) {
     const tx =
       d[0] > 0
@@ -289,12 +327,16 @@ function objectEnd(O: V, dir: V, thickness: number, model: RouteModel): V {
           ? (R - p[1]) / d[1]
           : Infinity;
     const t = Math.min(tx, ty);
-    if (t >= remaining) return add(p, mul(d, remaining));
+    if (t >= remaining) {
+      path.push(add(p, mul(d, remaining)));
+      return path;
+    }
     p = add(p, mul(d, t));
+    path.push(p);
     remaining -= t;
     d = tx < ty ? [-d[0], d[1]] : [d[0], -d[1]];
   }
-  return p;
+  return path;
 }
 
 export interface PlannedRoute {
@@ -303,6 +345,8 @@ export interface PlannedRoute {
   firstObjectBall: BallName;
   secondObjectBall: BallName;
   cutDeg: number; // 자르는 각 (0 = 정면)
+  /** 치는 사람이 볼 때 1적구의 어느 쪽을 맞히는지 (화면 기준 시계 방향으로 밀리면 왼쪽) */
+  contactSide: 'left' | 'right';
   deflectionDeg: number;
   thickness: Thickness;
   thicknessFraction: number;
@@ -311,6 +355,9 @@ export interface PlannedRoute {
   direction: 'clockwise' | 'counterclockwise' | null;
   lengthPx: number;
   strength: Strength;
+  /** 필요한 수구 출발 속도 (m/s). 실측 운동 값이 없으면 null */
+  cueSpeedMps: number | null;
+  objectPath: Point[]; // 1적구 예상 진행선 (참고)
   expectedSuccess: number; // 0~1, 요청 난이도의 실행 오차 가정을 넣은 몬테카를로
   /** 0~1, 초급 실행 오차로 잰 성공률. 난이도와 상관없는 공통 "쉬움" 지수 (경로끼리 공정하게 비교) */
   referenceSuccess: number;
@@ -437,12 +484,17 @@ function toPlan(
     toNorm,
   );
   const O = toPx(layout[w.first]);
-  const obEnd = objectEnd(O, mid.objectDir, f, model);
+  const obPath = objectPath(O, mid.objectDir, f, model);
+  const obEnd = obPath[obPath.length - 1];
   const cueEnd = mid.sim.hitPoint!;
   const T = toPx(layout[w.second]);
   const spread =
     Math.max(len(sub(obEnd, cueEnd)), len(sub(obEnd, T)), len(sub(cueEnd, T))) *
     PX_TO_M;
+  // 구간 길이: 가상 공 → 쿠션 접점들 → 두 번째 목적구 접점
+  const cuePts = [mid.ghost, ...mid.sim.banks, mid.sim.hitPoint!];
+  const segs = cuePts.slice(1).map((p, k) => len(sub(p, cuePts[k])));
+  const speed = requiredSpeed(segs, model);
   const expected = expectedSuccess(layout, cueBall, w, mid.cut, model, level);
   const reference =
     level === 'beginner'
@@ -454,6 +506,8 @@ function toPlan(
     firstObjectBall: w.first,
     secondObjectBall: w.second,
     cutDeg: Math.round(Math.abs(mid.cut) * 10) / 10,
+    // 1적구가 진행 방향 오른쪽(화면 시계 방향)으로 밀려 나가려면 수구가 1적구의 왼쪽을 맞혀야 한다
+    contactSide: mid.cut > 0 ? 'left' : 'right',
     deflectionDeg: Math.round(deflectionForCut(model, Math.abs(mid.cut))),
     thickness: thicknessBucket(f),
     thicknessFraction: Math.round(f * 100) / 100,
@@ -461,9 +515,14 @@ function toPlan(
     directionWindowDeg: directionWindow(layout, cueBall, w, mid.cut, model),
     direction: turnDirection(points),
     lengthPx: Math.round(mid.sim.length),
-    strength: strengthForLength(mid.sim.length),
+    strength:
+      speed !== null
+        ? strengthForSpeed(speed, model)
+        : strengthForLength(mid.sim.length),
+    cueSpeedMps: speed !== null ? speedToMps(speed) : null,
     expectedSuccess: expected,
     referenceSuccess: reference,
+    objectPath: obPath.map(toNorm),
     nextLayout: {
       cueEnd: toNorm(cueEnd),
       objectBallEnd: toNorm(obEnd),

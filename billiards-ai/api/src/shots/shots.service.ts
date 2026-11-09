@@ -33,6 +33,39 @@ export function parseConfirmBody(body: unknown): boolean | null {
   );
 }
 
+export interface ShotPatch {
+  scoreConfirmed?: boolean | null;
+  kissObserved?: boolean | null;
+}
+
+/**
+ * PATCH 본문 검사: { "scoreConfirmed"?: true|false|null, "kissObserved"?: true|false|null } (하나 이상)
+ * kissObserved는 사람이 영상으로 본 쫑 여부다. 쫑 예측을 다시 맞출 정답으로 쓴다.
+ */
+export function parseShotPatch(body: unknown): ShotPatch {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new BadRequestException('본문은 JSON 객체여야 합니다');
+  }
+  const b = body as Record<string, unknown>;
+  const out: ShotPatch = {};
+  for (const key of ['scoreConfirmed', 'kissObserved'] as const) {
+    if (!(key in b)) continue;
+    const v = b[key];
+    if (v !== true && v !== false && v !== null) {
+      throw new BadRequestException(
+        `${key}는 true, false, null 중 하나여야 합니다`,
+      );
+    }
+    out[key] = v;
+  }
+  if (!('scoreConfirmed' in out) && !('kissObserved' in out)) {
+    throw new BadRequestException(
+      'scoreConfirmed 또는 kissObserved가 필요합니다',
+    );
+  }
+  return out;
+}
+
 @Injectable()
 export class ShotsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -78,6 +111,7 @@ export class ShotsService {
       failReason: s.failReason,
       scoreCandidate: s.scoreCandidate,
       scoreConfirmed: s.scoreConfirmed,
+      kissObserved: s.kissObserved,
       // 자동 확정: 물리 판정 + 차례 신호 (analyzer/judge.py). 사람 확인이 있으면 그것이 우선
       scoreBasis: s.scoreBasis,
       scoreConfidence: s.scoreConfidence,
@@ -166,5 +200,23 @@ export class ShotsService {
     });
 
     return { id, scoreConfirmed, scores };
+  }
+
+  /** 득점 확인과 쫑 기록을 함께 받는다. 득점 확인이 있으면 점수도 다시 센다 */
+  async patch(id: number, p: ShotPatch) {
+    const out: Record<string, unknown> = { id };
+    if ('scoreConfirmed' in p) {
+      Object.assign(out, await this.confirm(id, p.scoreConfirmed ?? null));
+    }
+    if ('kissObserved' in p) {
+      const exists = await this.prisma.shot.count({ where: { id } });
+      if (!exists) throw new NotFoundException(`샷 ${id}이 없습니다`);
+      await this.prisma.shot.update({
+        where: { id },
+        data: { kissObserved: p.kissObserved ?? null },
+      });
+      out.kissObserved = p.kissObserved ?? null;
+    }
+    return out;
   }
 }

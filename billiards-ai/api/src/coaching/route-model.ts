@@ -18,8 +18,9 @@ export interface Bin {
 }
 
 interface PathValidation {
-  reproduce_rate: number;
-  bank_error_cm_median: number | null;
+  reproduce_rate: number; // 느슨: 쿠션 3회 이상 뒤 2적구 (무작위로 쳐도 약 23%)
+  strict_rate?: number; // 엄격: 실제와 같은 쿠션 순서로 2적구
+  bank_error_cm_median?: number | null;
   n: number;
 }
 
@@ -43,6 +44,23 @@ export interface RouteModel {
       }
     >;
     path: { mirror: PathValidation; table: PathValidation };
+    /** 전 구간: 들어온 방향·두께만 주고 꺾임·반사를 모델로 굴린 재현율 */
+    planner_e2e?: {
+      method?: string;
+      mirror_stun: PathValidation;
+      table: PathValidation;
+    };
+    path_random_baseline?: { reproduce_rate: number; strict_rate: number };
+    kiss?: unknown;
+  };
+  kinematics?: {
+    decel: number;
+    retention: number;
+    speed_ratio_by_thickness: Bin[];
+    cue_speed_quantiles: [number, number];
+    /** 실제 샷의 실제 경로에 같은 공식을 적용한 필요 속도의 하위·상위 1/3 지점 (세기 기준) */
+    required_speed_quantiles?: [number, number];
+    n?: Record<string, number>;
   };
 }
 
@@ -129,6 +147,19 @@ export function loadRouteModel(): RouteModel {
   }
   cached = DEFAULT_ROUTE_MODEL;
   return cached;
+}
+
+/**
+ * 추천 경로 신뢰도: 전 구간 엄격 재현율 (실제와 같은 쿠션 순서로 2적구까지 재현한 비율).
+ * 없으면(이전 형식 파일) 쿠션 반사 구간의 엄격 재현율, 그것도 없으면 느슨한 재현율
+ */
+export function routeConfidence(model: RouteModel): number {
+  const v = model.validation;
+  return (
+    v.planner_e2e?.table.strict_rate ??
+    v.path.table.strict_rate ??
+    v.path.table.reproduce_rate
+  );
 }
 
 /** 시험용: 캐시를 비운다 */

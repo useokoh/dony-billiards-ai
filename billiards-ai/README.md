@@ -109,6 +109,8 @@ cd web && npm run dev
 .venv/bin/python -m analyzer.route_model
 ```
 
+웹 샷 화면에서 남긴 "쫑 났음/없음" 기록이 있으면 `data/billiards.db`에서 읽어 쫑 예측 검증의 정답으로 씁니다(`--db`로 다른 DB 지정). 결과 파일의 `validation`에 단계별 정확도(교차 검증)가 들어 있습니다.
+
 ## 분석 결과를 DB에 저장
 
 `data/results/shots/*.json`(있으면 궤적 JSON도)을 SQLite(`data/billiards.db`)에 넣는다. 같은 영상을 다시 넣으면 이전 기록을 지우고 새로 저장하되, 사람이 확인한 득점 값과 경기에 연결한 선수는 옮긴다.

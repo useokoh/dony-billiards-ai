@@ -3,6 +3,7 @@ import type { PrismaService } from '../prisma/prisma.service.js';
 import {
   parseConfirmBody,
   parseHitOrder,
+  parseShotPatch,
   ShotsService,
 } from './shots.service.js';
 
@@ -143,5 +144,48 @@ describe('parseConfirmBody', () => {
     ]) {
       expect(() => parseConfirmBody(body)).toThrow(BadRequestException);
     }
+  });
+});
+
+describe('parseShotPatch / patch (쫑 기록)', () => {
+  it('득점 확인·쫑 기록 중 하나 이상', () => {
+    expect(parseShotPatch({ kissObserved: true })).toEqual({
+      kissObserved: true,
+    });
+    expect(
+      parseShotPatch({ scoreConfirmed: null, kissObserved: false }),
+    ).toEqual({ scoreConfirmed: null, kissObserved: false });
+    for (const b of [{}, { kissObserved: 'yes' }, null, []]) {
+      expect(() => parseShotPatch(b)).toThrow(BadRequestException);
+    }
+  });
+  it('쫑만 보내면 점수는 다시 세지 않고 쫑 값만 저장', async () => {
+    const p = {
+      shot: {
+        count: vi.fn().mockResolvedValue(1),
+        update: vi.fn(),
+        findUnique: vi.fn(),
+      },
+      $transaction: vi.fn(),
+    };
+    const svc = new ShotsService(p as unknown as PrismaService);
+    expect(await svc.patch(5, { kissObserved: true })).toEqual({
+      id: 5,
+      kissObserved: true,
+    });
+    expect(p.shot.update).toHaveBeenCalledWith({
+      where: { id: 5 },
+      data: { kissObserved: true },
+    });
+    expect(p.$transaction).not.toHaveBeenCalled();
+  });
+  it('없는 샷의 쫑 기록은 404', async () => {
+    const p = {
+      shot: { count: vi.fn().mockResolvedValue(0), update: vi.fn() },
+    };
+    const svc = new ShotsService(p as unknown as PrismaService);
+    await expect(svc.patch(5, { kissObserved: true })).rejects.toThrow(
+      NotFoundException,
+    );
   });
 });

@@ -57,6 +57,10 @@ export function parseExecutionHint(value: string | null): ExecutionHint | null {
       basis: t.basis === 'layout' ? 'layout' : 'template',
       deflectionDeg:
         typeof t.deflectionDeg === 'number' ? t.deflectionDeg : null,
+      contactSide:
+        t.contactSide === 'left' || t.contactSide === 'right'
+          ? t.contactSide
+          : null,
     },
     cushionPlan: {
       order: order as ExecutionHint['cushionPlan']['order'],

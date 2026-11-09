@@ -556,3 +556,39 @@
   font-size: 16px;
   color: var(--foreground);
 }
+
+/* ── 실행 코칭 그림 (당점·두께·세기) ── */
+.diagrams {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.diagram {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  border-radius: 10px;
+  background: var(--felt);
+}
+.diagram svg {
+  width: 100%;
+  max-width: 96px;
+  height: auto;
+}
+.diagram figcaption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+  color: var(--soft);
+}
+.diagram figcaption b {
+  font-size: 12px;
+  color: var(--foreground);
+}

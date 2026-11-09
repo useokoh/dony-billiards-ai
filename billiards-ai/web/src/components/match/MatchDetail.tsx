@@ -112,6 +112,21 @@ export default function MatchDetail() {
     }
   }
 
+  /** 쫑 기록. 이미 누른 버튼을 다시 누르면 취소(null) */
+  async function markKiss(value: boolean) {
+    if (!shot || saving) return;
+    const next = shot.kissObserved === value ? null : value;
+    setSaving(true);
+    try {
+      const r = await api.markKiss(shot.id, next);
+      setShot({ ...shot, kissObserved: r.kissObserved });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   /** 선공·후공에 선수 프로필 연결 (코칭 난이도가 그 선수의 목표 핸디로 정해진다) */
   async function linkPlayer(side: "firstPlayerId" | "secondPlayerId", value: string) {
     if (!match) return;
@@ -273,6 +288,7 @@ export default function MatchDetail() {
               shot={shot}
               saving={saving}
               onConfirm={confirm}
+              onKiss={markKiss}
               onPrev={pos > 0 ? () => setShotId(order[pos - 1]) : undefined}
               onNext={pos >= 0 && pos < order.length - 1 ? () => setShotId(order[pos + 1]) : undefined}
             />

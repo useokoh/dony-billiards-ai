@@ -108,15 +108,25 @@ export class ResultsImportService {
     // 여러 테이블에 나눠 쓰므로 하나라도 실패하면 전부 되돌린다.
     return this.prisma.$transaction(
       async (tx) => {
-        // 지우기 전에 사람이 확인한 득점 기록을 시작 프레임 기준으로 보관한다
+        // 지우기 전에 사람이 확인한 득점·쫑 기록을 시작 프레임 기준으로 보관한다
         const previous = await tx.shot.findMany({
-          where: { match: { videoPath }, scoreConfirmed: { not: null } },
-          select: { startFrame: true, scoreConfirmed: true },
+          where: {
+            match: { videoPath },
+            OR: [
+              { scoreConfirmed: { not: null } },
+              { kissObserved: { not: null } },
+            ],
+          },
+          select: {
+            startFrame: true,
+            scoreConfirmed: true,
+            kissObserved: true,
+          },
         });
         const kept = new Map(
           previous.map((p) => [
             confirmationKey(p.startFrame),
-            p.scoreConfirmed,
+            { scoreConfirmed: p.scoreConfirmed, kissObserved: p.kissObserved },
           ]),
         );
 
@@ -170,7 +180,8 @@ export class ResultsImportService {
           const judge = judgeFields(s);
           results[judge.result as keyof typeof results] += 1;
           const key = confirmationKey(s.start_frame);
-          const scoreConfirmed = kept.get(key) ?? null;
+          const scoreConfirmed = kept.get(key)?.scoreConfirmed ?? null;
+          const kissObserved = kept.get(key)?.kissObserved ?? null;
           if (kept.has(key)) restored += 1;
 
           const shotEvents = buildShotEvents(s, fps);
@@ -198,6 +209,7 @@ export class ResultsImportService {
               // ⑨ 득점 자동 확정 (analyzer/judge.py)과 이전에 사람이 확인한 값
               ...judge,
               scoreConfirmed,
+              kissObserved,
               events: { create: shotEvents },
               trajectories: trajectories.has(s.shot_no)
                 ? { create: trajectories.get(s.shot_no) }

@@ -42,6 +42,8 @@ export interface ExecutionHint {
     /** layout: 배치로 계산한 꺾임 각에서 구함(무회전 기준), template: 실패 유형별 예시 */
     basis: 'layout' | 'template';
     deflectionDeg: number | null; // 첫 목적구 뒤 수구가 꺾이는 각 (layout일 때)
+    /** 치는 사람이 볼 때 1적구의 어느 쪽을 맞히는지 (layout일 때, 정면 두께면 의미가 작다) */
+    contactSide: 'left' | 'right' | null;
   };
   cushionPlan: {
     order: RailKind[]; // 쿠션 순서. 첫 목적구를 먼저 직접 맞히는 경로는 빈 배열
@@ -93,6 +95,13 @@ export interface RouteComparison {
   referenceSuccess: number;
   cutDeg: number; // 겨냥할 자르는 각 (0 = 정면)
   pathLengthM: number; // 첫 목적구 뒤 수구가 굴러가는 거리 (m)
+  /** 필요한 수구 출발 속도 (m/s): 실측 감속·쿠션 속도 손실로 거꾸로 계산. 세기(약하게·보통·강하게)의 근거 */
+  cueSpeedMps: number | null;
+  /**
+   * 1적구 예상 진행선 (실측 이동 거리 중앙값, 참고). 쫑 여부는 영상 데이터로 예측이 검증되지 않아
+   * (analyzer/kiss.py, 실제 쫑 구분력 우연 수준) 경고를 만들지 않고 선만 보여 준다.
+   */
+  objectPath: [number, number][];
   /** 다음 배치 추정: 1적구는 실측 이동 거리 중앙값, 수구는 두 번째 목적구 접점에서 멈춘다고 가정 */
   nextLayout: {
     cueEnd: [number, number];

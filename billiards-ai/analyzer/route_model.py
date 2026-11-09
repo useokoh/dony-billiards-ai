@@ -3,7 +3,8 @@
 거울 반사(들어온 각 = 나간 각)만으로 그린 경로는 실제와 다르다. 쿠션 탄성, 회전, 속도 때문이다.
 이 프로그램은 분석이 끝난 영상들에서 다음을 측정한다.
 
-1. 쿠션 반사 법칙: 수구가 쿠션에 들어온 각 α와 나간 각 β (쿠션에 수직인 선 기준, 도)
+1. 쿠션 반사 법칙: 수구가 쿠션에 들어온 각 α와 나간 각 β (쿠션에 수직인 선 기준, 도).
+   방향은 이전 사건 → 쿠션 → 다음 사건의 직선으로 잰다(쿠션 직후 휘는 구간의 영향을 줄임).
    → 장쿠션·단쿠션별로 α 10° 구간마다 β의 중앙값 표를 만든다(사이 값은 직선 보간).
    교차 검증(영상 하나로 만들고 다른 영상으로 검사)에서 직선 β = a·α + b(오차 중앙값 5.0°)보다
    표 방식(2.7°)이 정확했고, 거울 반사는 14.0°였다 (2026-11-09).
@@ -23,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
+from analyzer import kiss
 from analyzer.calibrate import TABLE_H, TABLE_W
 from analyzer.detect import BALL_RADIUS
 
@@ -125,23 +127,29 @@ def events_near(frames: list[int], f: int, exclude: int | None = None) -> bool:
     return any(abs(e - f) <= CLEAR for e in frames if e != exclude)
 
 
-def measure(track: Path, shots_file: Path, video: int = 0) -> dict:
+def measure(track: Path, shots_file: Path, video: int = 0, kiss_labels: dict[int, bool] | None = None) -> dict:
     """영상 1개에서 쿠션 반사, 충돌 꺾임, 1적구 이동 거리, 검증용 샷을 모은다."""
     with np.load(track) as t:
         px = t["positions"] * np.array([TABLE_W, TABLE_H])
     shots = json.loads(shots_file.read_text(encoding="utf-8"))["shots"]
     out = {"bounce": {"long": ([], []), "short": ([], [])}, "cut": ([], []), "travel": ([], []), "validate": []}
+    out["kin"] = kiss.measure_kinematics(px, shots, video, kiss_labels)  # 쫑 예측용 속도·감속
     for s in shots:
         cue = px[:, BALL_INDEX[s["cue_ball"]]]
         hits, cushions = s["hit_frames"], s["cushion_frames"]
         events = hits + cushions
-        # 1) 쿠션 반사
-        for c in cushions:
-            if events_near(events, c, exclude=c):
+        # 1) 쿠션 반사: 이전 사건 → 쿠션 → 다음 사건의 직선 방향으로 잰다.
+        #    쿠션 직후 짧은 구간 방향보다 회전으로 휘는 영향을 덜 받아 경로 재현이 낫다
+        #    (교차 검증: 재현율 46.4% → 47.5%, 쿠션 접점 오차 6.9cm → 4.8cm, 2026-11-09)
+        ordered = sorted(events)
+        for i, c in enumerate(ordered):
+            if c not in cushions or i == 0 or i == len(ordered) - 1:
                 continue
-            d_in = direction(cue, c - NEAR - SPAN, c - NEAR)
-            d_out = direction(cue, c + NEAR, c + NEAR + SPAN)
-            if d_in is None or d_out is None:
+            a, b = ordered[i - 1], ordered[i + 1]
+            if c - a < 6 or b - c < 6:
+                continue
+            d_in, d_out = cue[c] - cue[a], cue[b] - cue[c]
+            if np.linalg.norm(d_in) < MIN_MOVE or np.linalg.norm(d_out) < MIN_MOVE:
                 continue
             rail = nearest_rail(cue[c])
             ang = rail_angles(rail, d_in, d_out)
@@ -167,6 +175,24 @@ def measure(track: Path, shots_file: Path, video: int = 0) -> dict:
                 if cut < 89:
                     out["cut"][0].append(cut)
                     out["cut"][1].append(angle_deg(d_in, d_out))
+                    out.setdefault("cut_video", []).append(video)
+                    # 전 구간 검증용: 실제 들어온 방향·자르는 각에서 꺾임을 모델로 추정해 굴린다
+                    if (
+                        s.get("result") == "success"
+                        and len(s["hit_order"]) == 2
+                        and (s.get("cushions_before_second_hit") or 0) >= 3
+                    ):
+                        cross = d_in[0] * d_obj[1] - d_in[1] * d_obj[0]
+                        out.setdefault("e2e", []).append({
+                            "video": video,
+                            "start": cue[h + NEAR].tolist(),
+                            "d_in": unit(d_in).tolist(),
+                            "cut": cut,
+                            "side": -1.0 if cross > 0 else 1.0,  # 수구는 1적구 반대쪽으로 꺾인다
+                            "target": px[s["start_frame"], BALL_INDEX[s["hit_order"][1]]].tolist(),
+                            "obstacle": obj[h + NEAR].tolist(),
+                            "actual_rails": [nearest_rail(cue[c]) for c in cushions if h < c < hits[1]],
+                        })
                     # 3) 1적구 이동 거리 (샷 끝까지 경로 길이)
                     end = int(s["end_frame"])
                     seg = obj[h : end + 1]
@@ -190,6 +216,8 @@ def measure(track: Path, shots_file: Path, video: int = 0) -> dict:
                 "target": second.tolist(),
                 "obstacle": obj[h + NEAR].tolist(),
                 "actual_banks": [cue[c].tolist() for c in after[:3]],
+                # 엄격한 재현 판정용: 두 번째 맞힘 전 실제 쿠션 순서
+                "actual_rails": [nearest_rail(cue[c]) for c in after if c < hits[1]],
             })
     return out
 
@@ -245,21 +273,86 @@ def simulate(start, d, target, obstacle, law, max_len=6000.0):
     return None, banks
 
 
+def reproduced(it: dict, d, law: dict | None) -> tuple[bool, bool, list]:
+    """(느슨: 쿠션 3회 이상 뒤 2적구, 엄격: 실제와 같은 쿠션 순서로 2적구, 예측 쿠션 접점)"""
+    n, banks = simulate(it["start"], d, it["target"], it["obstacle"], law)
+    loose = n is not None and n >= 3
+    rails = [nearest_rail(np.array(b)) for b in banks]
+    strict = loose and rails == it.get("actual_rails", [])
+    return loose, strict, banks
+
+
 def validate(items: list[dict], law: dict | None) -> dict:
-    reproduced, errors = 0, []
+    loose_n = strict_n = 0
+    errors = []
     for it in items:
-        n, banks = simulate(it["start"], it["dir"], it["target"], it["obstacle"], law)
-        if n is not None and n >= 3:
-            reproduced += 1
+        loose, strict, banks = reproduced(it, it["dir"], law)
+        loose_n += loose
+        strict_n += strict
         for pred, actual in zip(banks[:3], it["actual_banks"]):
             errors.append(float(np.linalg.norm(np.array(pred) - np.array(actual))))
     # px → cm: 대대 안쪽 장쿠션 약 284cm
     cm = 284 / TABLE_W
+    n = max(len(items), 1)
     return {
-        "reproduce_rate": round(reproduced / max(len(items), 1), 3),
+        "reproduce_rate": round(loose_n / n, 3),
+        "strict_rate": round(strict_n / n, 3),
         "bank_error_cm_median": round(float(np.median(errors)) * cm, 1) if errors else None,
         "n": len(items),
     }
+
+
+def rotate(v, deg: float) -> list[float]:
+    a = math.radians(deg)
+    return [math.cos(a) * v[0] - math.sin(a) * v[1], math.sin(a) * v[0] + math.cos(a) * v[1]]
+
+
+def validate_e2e(items: list[dict], law: dict | None, deflection: list[dict] | None) -> dict:
+    """전 구간: 실제 들어온 방향 + 자르는 각 → 꺾임(모델) → 쿠션 반사(모델). deflection이 없으면 무회전 공식"""
+    loose_n = strict_n = 0
+    for it in items:
+        if deflection:
+            xs = [(b["lo"] + b["hi"]) / 2 for b in deflection if b["n"] >= 7] or [(b["lo"] + b["hi"]) / 2 for b in deflection]
+            ys = [b["median"] for b in deflection if b["n"] >= 7] or [b["median"] for b in deflection]
+            defl = float(np.interp(it["cut"], xs, ys))
+        else:
+            defl = 90 - it["cut"]
+        loose, strict, _ = reproduced(it, rotate(it["d_in"], it["side"] * defl), law)
+        loose_n += loose
+        strict_n += strict
+    n = max(len(items), 1)
+    return {"reproduce_rate": round(loose_n / n, 3), "strict_rate": round(strict_n / n, 3), "n": len(items)}
+
+
+def random_baseline(items: list[dict], law: dict | None, directions: int = 72) -> dict:
+    """출발 방향을 무작위(5°마다)로 했을 때의 재현율. 모델 재현율이 이보다 높아야 의미가 있다"""
+    loose_n = strict_n = 0
+    total = 0
+    for it in items:
+        for k in range(directions):
+            a = 2 * math.pi * k / directions
+            loose, strict, _ = reproduced(it, [math.cos(a), math.sin(a)], law)
+            loose_n += loose
+            strict_n += strict
+            total += 1
+    return {"reproduce_rate": round(loose_n / max(total, 1), 3), "strict_rate": round(strict_n / max(total, 1), 3), "n": len(items)}
+
+
+def pool_kiss(results: list[dict]) -> dict:
+    out = {"method": "충돌 직후 실제 조건(위치·방향·속도)으로 두 공을 굴려 쫑을 예측하고 궤적의 실제 쫑과 비교 (쿠션 표는 교차 검증)"}
+    for kind in ("cue_object", "object_target"):
+        c = {k: sum(r["confusion"][kind][k] for r in results) for k in ("tp", "fp", "fn", "tn")}
+        n = max(sum(c.values()), 1)
+        out[kind] = {
+            "n": sum(c.values()),
+            "actual": c["tp"] + c["fn"],
+            "accuracy": round((c["tp"] + c["tn"]) / n, 3),
+            "baseline_accuracy": round((c["fp"] + c["tn"]) / n, 3),
+            "precision": round(c["tp"] / (c["tp"] + c["fp"]), 3) if c["tp"] + c["fp"] else None,
+            "recall": round(c["tp"] / (c["tp"] + c["fn"]), 3) if c["tp"] + c["fn"] else None,
+            "confusion": c,
+        }
+    return out
 
 
 def build_model(measurements: list[dict]) -> dict:
@@ -275,6 +368,11 @@ def build_model(measurements: list[dict]) -> dict:
             dst[0].extend(m[key][0])
             dst[1].extend(m[key][1])
         items.extend(m["validate"])
+    kin_all = {k: [] for k in ("decel", "retention", "ratio", "cue_speed", "items", "paths")}
+    for m in measurements:
+        for k in kin_all:
+            kin_all[k].extend(m["kin"][k])
+    kinematics = kiss.summarize(kin_all)
 
     def law_from(videos_out: set[int]) -> dict:
         law = {}
@@ -287,6 +385,12 @@ def build_model(measurements: list[dict]) -> dict:
     # 쿠션 1회 반사 오차 (교차 검증)
     per_bounce = {"mirror": [], "table": []}
     path = {"mirror": [], "table": []}
+    baselines = []
+    e2e = {"mirror_stun": [], "table": []}
+    e2e_items = [it for m in measurements for it in m.get("e2e", [])]
+    cut_videos = [v for m in measurements for v in m.get("cut_video", [])]
+    kiss_results = []
+    risk_scores, risk_labels = [], []
     for test in videos:
         law = law_from({test}) if len(videos) > 1 else law_from(set())
         for kind, (a, b, v) in bounce.items():
@@ -297,32 +401,90 @@ def build_model(measurements: list[dict]) -> dict:
         held = [it for it in items if it["video"] == test]
         path["mirror"].append(validate(held, None))
         path["table"].append(validate(held, law))
+        baselines.append(random_baseline(held, law))
+        held_e2e = [it for it in e2e_items if it["video"] == test]
+        train_cut = [(c, d) for c, d, v in zip(cut[0], cut[1], cut_videos) if v != test]
+        defl_table = binned_median([c for c, _ in train_cut], [d for _, d in train_cut], CUT_BINS) if train_cut else None
+        e2e["mirror_stun"].append(validate_e2e(held_e2e, None, None))
+        e2e["table"].append(validate_e2e(held_e2e, law, defl_table))
+        held_kiss = [it for it in kin_all["items"] if it["video"] == test]
+        bounce_fn = lambda d, rail, law=law: bounce_dir(d, rail, law)  # noqa: E731
+        kiss_results.append(kiss.validate_kiss(held_kiss, kinematics, bounce_fn))
+        rng = np.random.default_rng(test)
+        sd = (law["long"]["residual_sd"] + law["short"]["residual_sd"]) / 2
+        for it in held_kiss:
+            risk_scores.append(kiss.kiss_risk(it, kinematics, bounce_fn, sd, rng))
+            risk_labels.append(it["actual"])
 
     def pool(results: list[dict]) -> dict:
         n = sum(r["n"] for r in results)
         rate = sum(r["reproduce_rate"] * r["n"] for r in results) / max(n, 1)
+        strict = sum(r["strict_rate"] * r["n"] for r in results) / max(n, 1)
         errs = [r["bank_error_cm_median"] for r in results if r["bank_error_cm_median"] is not None]
-        return {"reproduce_rate": round(rate, 3), "bank_error_cm_median": round(float(np.mean(errs)), 1) if errs else None, "n": n}
+        return {"reproduce_rate": round(rate, 3), "strict_rate": round(strict, 3), "bank_error_cm_median": round(float(np.mean(errs)), 1) if errs else None, "n": n}
 
     def angle_stats(e: list[float]) -> dict:
         x = np.array(e)
         return {"median_deg": round(float(np.median(x)), 1), "within_5deg": round(float((x < 5).mean()), 2), "within_10deg": round(float((x < 10).mean()), 2), "n": len(x)}
 
     return {
-        "version": 2,
+        "version": 3,
         "generated": date.today().isoformat(),
         "units": "각도는 도, 거리는 당구대 세로 길이 = 1",
         "bounce": law_from(set()),
         "deflection_by_cut": binned_median(*cut, CUT_BINS),
         "deflection_residual_sd": deflection_sd(*cut),
         "object_travel_by_thickness": binned_median(*travel, THICK_BINS, digits=2),
+        "kinematics": kinematics,
         "validation": {
+            "kiss": {
+                **pool_kiss(kiss_results),
+                "risk": {
+                    "method": "조건을 흔들어 120번 굴린 쫑 비율(위험도)이 실제 쫑 샷을 얼마나 구분하는지 (AUC, 0.5 = 구분 못 함)",
+                    "auc": kiss.auc(risk_scores, risk_labels),
+                    "mean_risk_kiss": round(float(np.mean([r for r, l in zip(risk_scores, risk_labels) if l])), 3) if any(risk_labels) else None,
+                    "mean_risk_no_kiss": round(float(np.mean([r for r, l in zip(risk_scores, risk_labels) if not l])), 3) if not all(risk_labels) else None,
+                    "n": len(risk_labels),
+                    "actual_kiss": int(sum(risk_labels)),
+                    "human_labels": sum(1 for it in kin_all["items"] if it.get("label") == "human"),
+                },
+            },
             "method": "영상별 교차 검증 (한 영상으로 표를 만들고 다른 영상으로 검사)",
             "videos": len(videos),
             "per_bounce": {k: angle_stats(v) for k, v in per_bounce.items()},
             "path": {k: pool(v) for k, v in path.items()},
+            "planner_e2e": {
+                "method": "득점 샷에서 실제 들어온 방향과 두께만 주고 꺾임·쿠션 반사를 모델로 굴려 실제와 같은 쿠션 순서로 2적구에 닿는지",
+                **{k: {
+                    "reproduce_rate": round(sum(r["reproduce_rate"] * r["n"] for r in v) / max(sum(r["n"] for r in v), 1), 3),
+                    "strict_rate": round(sum(r["strict_rate"] * r["n"] for r in v) / max(sum(r["n"] for r in v), 1), 3),
+                    "n": sum(r["n"] for r in v),
+                } for k, v in e2e.items()},
+            },
+            "path_random_baseline": {
+                "reproduce_rate": round(float(np.mean([b["reproduce_rate"] for b in baselines])), 3),
+                "strict_rate": round(float(np.mean([b["strict_rate"] for b in baselines])), 3),
+            },
         },
     }
+
+
+def load_kiss_labels(db: Path, stem: str) -> dict[int, bool]:
+    """웹 샷 화면의 '쫑 났음/없음' 기록 {샷 시작 프레임: 쫑 여부}. DB나 칸이 없으면 빈 값"""
+    if not db.exists():
+        return {}
+    import sqlite3
+
+    try:
+        with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as con:
+            rows = con.execute(
+                "select s.start_frame, s.kiss_observed from shots s join matches m on s.match_id = m.id "
+                "where s.kiss_observed is not null and m.video_path like ?",
+                (f"%{stem}%",),
+            ).fetchall()
+    except sqlite3.Error:
+        return {}
+    return {int(f): bool(k) for f, k in rows}
 
 
 def main() -> None:
@@ -330,13 +492,14 @@ def main() -> None:
     parser.add_argument("--tracks", type=Path, default=Path("data/results/tracks"))
     parser.add_argument("--shots", type=Path, default=Path("data/results/shots"))
     parser.add_argument("--out", type=Path, default=Path("data/results/route_model.json"))
+    parser.add_argument("--db", type=Path, default=Path("data/billiards.db"), help="사람이 기록한 쫑 여부를 읽을 DB (없으면 궤적 추정만)")
     args = parser.parse_args()
 
     measurements = []
     for i, shots_file in enumerate(sorted(args.shots.glob("*.json"))):
         track = args.tracks / shots_file.stem / "track.npz"
         if track.exists():
-            measurements.append(measure(track, shots_file, video=i))
+            measurements.append(measure(track, shots_file, video=i, kiss_labels=load_kiss_labels(args.db, shots_file.stem)))
     if not measurements:
         raise SystemExit("궤적과 샷 결과가 있는 영상이 없습니다.")
     model = build_model(measurements)

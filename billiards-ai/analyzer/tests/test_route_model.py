@@ -58,3 +58,18 @@ def test_real_videos_table_beats_mirror():
     v = build_model(ms)["validation"]
     assert v["per_bounce"]["table"]["median_deg"] < v["per_bounce"]["mirror"]["median_deg"]
     assert v["path"]["table"]["reproduce_rate"] > v["path"]["mirror"]["reproduce_rate"]
+
+
+def test_load_kiss_labels(tmp_path):
+    import sqlite3
+
+    from analyzer.route_model import load_kiss_labels
+
+    db = tmp_path / "t.db"
+    with sqlite3.connect(db) as con:
+        con.execute("create table matches (id integer, video_path text)")
+        con.execute("create table shots (match_id integer, start_frame integer, kiss_observed integer)")
+        con.execute("insert into matches values (1, 'data/videos/abc_1.MP4'), (2, 'data/videos/other.MP4')")
+        con.executemany("insert into shots values (?,?,?)", [(1, 100, 1), (1, 200, 0), (1, 300, None), (2, 100, 1)])
+    assert load_kiss_labels(db, "abc_1") == {100: True, 200: False}
+    assert load_kiss_labels(tmp_path / "none.db", "abc_1") == {}

@@ -25,7 +25,11 @@ import {
   routeKey,
   type PlannedRoute,
 } from './route-geometry.js';
-import { loadRouteModel, type RouteModel } from './route-model.js';
+import {
+  loadRouteModel,
+  routeConfidence,
+  type RouteModel,
+} from './route-model.js';
 
 /** DB의 shot 필드를 실패 유형으로 바꾼다. 실패가 아니면 null */
 export function classifyFailure(shot: {
@@ -126,6 +130,7 @@ export function makeHint(spec: HintSpec, plan?: PlannedRoute): ExecutionHint {
       label: THICKNESS_LABEL[spec.thickness],
       basis: plan ? 'layout' : 'template',
       deflectionDeg: plan?.deflectionDeg ?? null,
+      contactSide: plan?.contactSide ?? null,
     },
     cushionPlan: {
       order: spec.order,
@@ -387,14 +392,16 @@ function geometryFields(plan: PlannedRoute, model: RouteModel) {
   return {
     points: plan.points,
     pointsBasis: 'simulated' as const,
-    confidence: model.validation.path.table.reproduce_rate,
+    confidence: routeConfidence(model),
     expectedSuccess: plan.expectedSuccess,
     comparison: {
       windowDeg: plan.windowDeg,
       directionWindowDeg: plan.directionWindowDeg,
       referenceSuccess: plan.referenceSuccess,
       cutDeg: plan.cutDeg,
+      cueSpeedMps: plan.cueSpeedMps,
       pathLengthM: Math.round(plan.lengthPx * (2.84 / 1480) * 10) / 10,
+      objectPath: plan.objectPath,
       nextLayout: plan.nextLayout,
     },
   };
@@ -634,8 +641,15 @@ export function buildFeedbackItems(
     ),
   ];
   if (hint) {
+    const side =
+      hint.firstBallThickness.contactSide &&
+      hint.firstBallThickness.fraction !== 'full'
+        ? hint.firstBallThickness.contactSide === 'left'
+          ? '의 왼쪽을'
+          : '의 오른쪽을'
+        : '을';
     const first = hint.firstObjectBall
-      ? `${BALL_LABEL[hint.firstObjectBall]}(첫 목적구)을`
+      ? `${BALL_LABEL[hint.firstObjectBall]}(첫 목적구)${side}`
       : '첫 목적구를';
     items.push(
       item(

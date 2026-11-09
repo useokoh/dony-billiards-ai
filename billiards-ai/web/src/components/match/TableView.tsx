@@ -84,6 +84,18 @@ export default function TableView({ trajectory, route, loading }: Props) {
           </g>
         )}
 
+        {/* 1적구 예상 진행선 (점선, 1적구 색): 쫑 위험은 이 선을 보고 판단한다 (예측은 아직 못 함) */}
+        {route?.comparison && route.executionHint?.firstObjectBall && route.comparison.objectPath.length > 1 && (
+          <polyline
+            points={toPath(route.comparison.objectPath)}
+            fill="none"
+            stroke={BALL_COLOR[route.executionHint.firstObjectBall]}
+            strokeWidth="2"
+            strokeDasharray="4 6"
+            opacity="0.8"
+          />
+        )}
+
         {/* 추천 경로의 예상 정지 위치 (점선 원): 1적구는 실측 이동 거리로 추정, 수구는 두 번째 목적구 접점 */}
         {route?.comparison && route.executionHint?.firstObjectBall && (
           <g fill="none" strokeDasharray="5 5" strokeWidth="2.5">
@@ -129,7 +141,7 @@ export default function TableView({ trajectory, route, loading }: Props) {
           : !balls
             ? "이 샷은 궤적 데이터가 없습니다"
             : routePts
-              ? "실선: 실제 경로 · 점선: 추천 경로(실측 보정 계산, 참고용) · 숫자: 쿠션 순서 · 점선 원: 예상 정지 위치"
+              ? "실선: 실제 경로 · 파란 점선: 추천 경로 · 숫자: 쿠션 순서 · 공 색 점선: 1적구 예상 진행 · 점선 원: 예상 정지 위치"
               : "실선: 실제 경로 · 진한 공: 시작 위치 · 옅은 공: 멈춘 위치"}
       </figcaption>
     </figure>
