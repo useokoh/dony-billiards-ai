@@ -16,6 +16,8 @@ const CHOICES: { value: Choice; label: string }[] = [
   { value: "advanced", label: "고급 27+" },
 ];
 const DIFFICULTY: Record<CoachingLevel, string> = { beginner: "초급", intermediate: "중급", advanced: "고급" };
+const LAYOUT_TEXT = { good: "모여 있음", normal: "보통", hard: "흩어짐" } as const;
+const pct = (v: number) => `${Math.round(v * 100)}%`;
 const SOURCE_TEXT: Record<RouteResponse["levelSource"], string> = {
   "query-level": "직접 고른 난이도",
   "query-handicap": "입력한 목표 핸디",
@@ -114,11 +116,25 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
                     <span className={styles.routeTitle}>{r.description}</span>
                     <span className={styles.tag_muted}>{DIFFICULTY[r.difficulty]}</span>
                   </span>
+                  {r.expectedSuccess !== null && r.comparison && (
+                    <span className={styles.routeStats}>
+                      <span>
+                        <b>{pct(r.expectedSuccess)}</b>기대 성공률
+                      </span>
+                      <span>
+                        <b>{r.comparison.windowDeg}°</b>두께 허용 폭
+                      </span>
+                      <span>
+                        <b>{LAYOUT_TEXT[r.comparison.nextLayout.rating]}</b>다음 배치
+                      </span>
+                    </span>
+                  )}
                   {r.executionHint && <HintTable hint={r.executionHint} />}
                   {r.rationale && <span className={styles.routeWhy}>{r.rationale}</span>}
                   <span className={styles.statSub}>
                     {r.points ? "그림에 점선으로 표시" : "공 배치로 계산할 수 없는 경로라 그림 없음"}
-                    {r.confidence !== null && ` · 계산 신뢰도 ${Math.round(r.confidence * 100)}%`}
+                    {r.comparison && ` · 수구 이동 약 ${r.comparison.pathLengthM}m`}
+                    {r.confidence !== null && ` · 경로 모델 재현율 ${pct(r.confidence)}`}
                   </span>
                 </button>
               </li>
@@ -127,7 +143,12 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
         </>
       )}
 
-      {current && <p className={styles.disclaimer}>{current.route.disclaimer}</p>}
+      {current && (
+        <p className={styles.disclaimer}>
+          {current.route.disclaimer} 경로는 이 당구대의 실제 경기 영상에서 잰 쿠션 반사·충돌 꺾임으로 굴려 본 것입니다.
+          기대 성공률은 난이도별 실행 오차를 가정한 값이고, 다음 배치는 1적구 이동 거리 실측 중앙값으로 추정한 참고값입니다.
+        </p>
+      )}
     </div>
   );
 }

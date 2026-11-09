@@ -130,6 +130,8 @@ export function mapStoredRoutes(
       cushionCount: r.cushionCount,
       points: parsePoints(r.points),
       pointsBasis: 'stored' as const,
+      expectedSuccess: null,
+      comparison: null,
       confidence:
         r.confidence !== null && r.confidence >= 0 && r.confidence <= 1
           ? r.confidence

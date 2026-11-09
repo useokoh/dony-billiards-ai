@@ -109,8 +109,15 @@ export type RecommendedRoute = {
   description: string;
   cushionCount: number;
   points: Point[] | null;
-  pointsBasis: "mirror_geometry" | "stored" | null;
-  confidence: number | null;
+  pointsBasis: "simulated" | "stored" | null;
+  confidence: number | null; // 경로 모델이 실제 득점 경로를 재현한 비율 (교차 검증)
+  expectedSuccess: number | null; // 난이도별 실행 오차 가정을 넣어 굴려 본 득점 비율
+  comparison: {
+    windowDeg: number;
+    cutDeg: number;
+    pathLengthM: number;
+    nextLayout: { cueEnd: Point; objectBallEnd: Point; secondBall: Point; spreadM: number; rating: "good" | "normal" | "hard" };
+  } | null;
   source: "rule_template" | "stored";
   rationale: string;
   executionHint: ExecutionHint | null;

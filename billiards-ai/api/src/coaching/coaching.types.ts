@@ -68,15 +68,36 @@ export interface RecommendedRouteDto {
   cushionCount: number;
   /** 경로 좌표(당구대 기준 0~1): 수구 → 첫 목적구 → 쿠션 접점 → 두 번째 목적구. 배치가 없으면 null */
   points: [number, number][] | null;
-  /** mirror_geometry: 거울 반사로 계산한 무회전 이상 경로, stored: 분석기 저장값 */
-  pointsBasis: 'mirror_geometry' | 'stored' | null;
-  /** 물리·규칙 계산의 신뢰도 0~1 (회전 판정 정확도가 아님). 배치 없는 규칙 예시는 null */
+  /** simulated: 실측 보정 모델로 굴려 본 경로, stored: 분석기 저장값 */
+  pointsBasis: 'simulated' | 'stored' | null;
+  /**
+   * 경로 모델 신뢰도 0~1: 실측 보정 모델이 실제 득점 경로를 재현한 비율(영상별 교차 검증).
+   * 회전 판정 정확도가 아니다. 배치 없는 규칙 예시는 null
+   */
   confidence: number | null;
+  /** 기대 성공률 0~1: 난이도별 실행 오차 가정을 넣고 다시 굴려 본 득점 비율. 계산 못 하면 null */
+  expectedSuccess: number | null;
+  /** 경로 비교 값 (배치로 계산했을 때만) */
+  comparison: RouteComparison | null;
   /** rule_template: 실패 유형×난이도 규칙 예시, stored: DB에 저장된 분석기 결과 */
   source: 'rule_template' | 'stored';
   /** 왜 이 경로·두께·회전을 권하는지 */
   rationale: string;
   executionHint: ExecutionHint | null;
+}
+
+export interface RouteComparison {
+  windowDeg: number; // 득점이 되는 두께(자르는 각) 허용 폭, 도
+  cutDeg: number; // 겨냥할 자르는 각 (0 = 정면)
+  pathLengthM: number; // 첫 목적구 뒤 수구가 굴러가는 거리 (m)
+  /** 다음 배치 추정: 1적구는 실측 이동 거리 중앙값, 수구는 두 번째 목적구 접점에서 멈춘다고 가정 */
+  nextLayout: {
+    cueEnd: [number, number];
+    objectBallEnd: [number, number];
+    secondBall: [number, number];
+    spreadM: number;
+    rating: 'good' | 'normal' | 'hard';
+  };
 }
 
 export type FailureKind =

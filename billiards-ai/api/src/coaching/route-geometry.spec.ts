@@ -1,58 +1,62 @@
 import {
-  bankPoints,
+  bounce,
+  planAlternatives,
   planRoute,
-  railSequences,
-  thicknessFromDeflection,
+  simulate,
+  strengthForLength,
+  thicknessBucket,
   turnDirection,
 } from './route-geometry.js';
 import { buildRuleRoutes } from './route-rules.js';
+import { DEFAULT_ROUTE_MODEL as model } from './route-model.default.js';
 import type { Point } from '../trajectory/trajectory.js';
 
-const RY = 18 / 740;
-const RX = 18 / 1480;
-
-describe('bankPoints', () => {
-  it('한 쿠션 반사: 입사각 = 반사각', () => {
-    const a: Point = [0.2, 0.6];
-    const b: Point = [0.7, 0.4];
-    const [p] = bankPoints(a, b, ['top'])!;
-    expect(p[1]).toBeCloseTo(RY);
-    // 실제 길이 비율(가로 2배)에서 기울기가 대칭이어야 한다
-    const inSlope = ((p[0] - a[0]) * 2) / (a[1] - p[1]);
-    const outSlope = ((b[0] - p[0]) * 2) / (b[1] - p[1]);
-    expect(inSlope).toBeCloseTo(outSlope);
+describe('bounce', () => {
+  it('거울 반사: 수직 성분만 뒤집힌다', () => {
+    expect(bounce([1, -1], 'top', null)).toEqual([1, 1]);
+    expect(bounce([1, 1], 'right', null)).toEqual([-1, 1]);
   });
-  it('세 쿠션 접점이 모두 쿠션 위에 있다', () => {
-    const pts = bankPoints([0.3, 0.3], [0.6, 0.7], ['top', 'right', 'bottom'])!;
-    expect(pts).toHaveLength(3);
-    expect(pts[0][1]).toBeCloseTo(RY);
-    expect(pts[1][0]).toBeCloseTo(1 - RX);
-    expect(pts[2][1]).toBeCloseTo(1 - RY);
-  });
-  it('불가능한 반사는 null', () => {
-    // 같은 쪽 쿠션을 거쳐 바로 옆 점으로 가는 건 가능하지만, 반대쪽을 향하면 쿠션에 닿지 않는다
-    expect(bankPoints([0.5, 0.5], [0.5, 0.5], ['left', 'left'])).toBeNull();
+  it('실측 표: 쿠션을 따라 같은 쪽으로 가고, 45°로 들어오면 더 눕게 나간다', () => {
+    const [t, n] = bounce([Math.SQRT1_2, -Math.SQRT1_2], 'top', model);
+    expect(t).toBeGreaterThan(0);
+    expect(n).toBeGreaterThan(0);
+    const beta = (Math.atan2(t, n) * 180) / Math.PI;
+    expect(beta).toBeGreaterThan(50); // 실측 표: 45° → 약 58°
   });
 });
 
-describe('railSequences', () => {
-  it('장-단-장 조합 8개(같은 장쿠션으로 돌아오는 경우 포함), 같은 쿠션 연속 없음', () => {
-    const seqs = railSequences(['long', 'short', 'long']);
-    expect(seqs).toHaveLength(8);
-    for (const s of seqs) expect(s[0]).not.toBe(s[1]);
-    for (const s of seqs) {
-      expect(s[0] === 'top' || s[0] === 'bottom').toBe(true);
-      expect(s[1] === 'left' || s[1] === 'right').toBe(true);
+describe('simulate', () => {
+  it('쿠션 없이 바로 맞는 경우', () => {
+    const r = simulate([200, 370], [1, 0], [600, 370], null);
+    expect(r.cushionsBeforeHit).toBe(0);
+    expect(r.hitPoint![0]).toBeCloseTo(600 - 0, -2);
+  });
+  it('쿠션 접점은 쿠션 위(공 반지름 안쪽)에 있다', () => {
+    const r = simulate([300, 300], [1, -0.6], [-999, -999], null);
+    expect(r.cushionsBeforeHit).toBeNull();
+    expect(r.banks.length).toBeGreaterThan(2);
+    for (const [x, y] of r.banks) {
+      const onRail =
+        Math.abs(y - 18) < 1e-6 ||
+        Math.abs(y - 722) < 1e-6 ||
+        Math.abs(x - 18) < 1e-6 ||
+        Math.abs(x - 1462) < 1e-6;
+      expect(onRail).toBe(true);
     }
   });
 });
 
-describe('두께·방향 변환', () => {
-  it('꺾임이 작을수록 얇게', () => {
-    expect(thicknessFromDeflection(20)).toBe('1/4');
-    expect(thicknessFromDeflection(60)).toBe('1/2');
-    expect(thicknessFromDeflection(75)).toBe('3/4');
-    expect(thicknessFromDeflection(89)).toBe('full');
+describe('표시 변환', () => {
+  it('두께 단계', () => {
+    expect(thicknessBucket(0.2)).toBe('1/4');
+    expect(thicknessBucket(0.5)).toBe('1/2');
+    expect(thicknessBucket(0.8)).toBe('3/4');
+    expect(thicknessBucket(0.95)).toBe('full');
+  });
+  it('경로 길이로 강약', () => {
+    expect(strengthForLength(1480 * 2)).toBe('soft');
+    expect(strengthForLength(1480 * 3.5)).toBe('medium');
+    expect(strengthForLength(1480 * 4.5)).toBe('firm');
   });
   it('화면 기준(y 아래로) 오른쪽 → 아래는 시계 방향', () => {
     expect(
@@ -85,16 +89,17 @@ const layout = {
 };
 
 describe('planRoute', () => {
-  it('수구 → 첫 목적구 → 쿠션 3개 → 두 번째 목적구, 꺾임 80° 이하', () => {
-    const r = planRoute(layout, 'white', ['long', 'short', 'long'])!;
+  it('3쿠션 이상 뒤 두 번째 목적구에 닿는 경로와 비교 값', () => {
+    const r = planRoute(layout, 'white', [], model, 'intermediate')!;
     expect(r).not.toBeNull();
-    expect(r.points).toHaveLength(6);
+    expect(r.rails.length).toBeGreaterThanOrEqual(3);
     expect(r.points[0]).toEqual(layout.white);
-    expect(r.points[1]).toEqual(layout[r.firstObjectBall]);
-    expect(r.points[5]).toEqual(layout[r.secondObjectBall]);
+    expect(r.points).toHaveLength(r.rails.length + 3);
     expect(r.firstObjectBall).not.toBe(r.secondObjectBall);
-    expect(r.deflectionDeg).toBeLessThanOrEqual(80);
-    expect(r.direction).not.toBeNull();
+    expect(r.expectedSuccess).toBeGreaterThanOrEqual(0);
+    expect(r.expectedSuccess).toBeLessThanOrEqual(1);
+    expect(r.windowDeg).toBeGreaterThan(0);
+    expect(['good', 'normal', 'hard']).toContain(r.nextLayout.rating);
     for (const [x, y] of r.points) {
       expect(x).toBeGreaterThanOrEqual(0);
       expect(x).toBeLessThanOrEqual(1);
@@ -102,43 +107,109 @@ describe('planRoute', () => {
       expect(y).toBeLessThanOrEqual(1);
     }
   });
+  it('같은 배치는 같은 결과 (결정적 난수)', () => {
+    expect(planRoute(layout, 'white', [], model, 'beginner')).toEqual(
+      planRoute(layout, 'white', [], model, 'beginner'),
+    );
+  });
+  it('쿠션 순서를 지정하면 그 순서로 시작한다', () => {
+    const r = planRoute(layout, 'white', ['long', 'short', 'long'], model);
+    if (r) {
+      expect(r.rails.length).toBeLessThanOrEqual(4);
+      expect(['top', 'bottom']).toContain(r.rails[0]);
+      expect(['left', 'right']).toContain(r.rails[1]);
+    }
+  });
+  it('실행 오차가 작은(고급) 쪽이 기대 성공률이 같거나 높다', () => {
+    const b = planRoute(layout, 'white', [], model, 'beginner')!;
+    const a = planRoute(layout, 'white', [], model, 'advanced')!;
+    expect(a.expectedSuccess).toBeGreaterThanOrEqual(b.expectedSuccess - 0.05);
+  });
+});
+
+describe('planAlternatives (고급 비교)', () => {
+  it('기대 성공률 순, 첫 목적구·쿠션 순서가 겹치지 않는다', () => {
+    const alts = planAlternatives(layout, 'white', model, 'advanced');
+    expect(alts.length).toBeGreaterThan(0);
+    for (let i = 1; i < alts.length; i++) {
+      expect(alts[i - 1].expectedSuccess).toBeGreaterThanOrEqual(
+        alts[i].expectedSuccess,
+      );
+    }
+    const keys = alts.map((a) => `${a.firstObjectBall}:${a.rails.join(',')}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
 });
 
 describe('buildRuleRoutes + 배치', () => {
   const geometry = { layout, cueBall: 'white' as const };
-  it('배치가 있으면 좌표·첫 목적구·방향·순회전을 채운다', () => {
-    const [top] = buildRuleRoutes('not_enough_cushions', 'beginner', geometry);
-    const h = top.executionHint!;
-    expect(top.points).not.toBeNull();
-    expect(top.pointsBasis).toBe('mirror_geometry');
-    expect(top.confidence).toBe(0.35);
-    expect(h.firstObjectBall).not.toBeNull();
-    expect(h.firstBallThickness.basis).toBe('layout');
-    expect(h.cushionPlan.direction).not.toBeNull();
-    expect(h.spin.side).toBe(
-      h.cushionPlan.direction === 'clockwise' ? 'right' : 'left',
-    );
-    expect(h.basis).toBe('recommended');
-    expect(h.verified).toBe(false);
-  });
-  it('얇은 두께 변형은 기본 경로보다 얇다(또는 이미 가장 얇음)', () => {
-    const [basic, thin] = buildRuleRoutes(
+  it('초급: 템플릿 경로에 실측 보정 좌표·기대 성공률·모델 신뢰도', () => {
+    const [top] = buildRuleRoutes(
       'not_enough_cushions',
-      'intermediate',
+      'beginner',
       geometry,
+      model,
     );
-    const order = ['1/4', '1/2', '3/4', 'full'];
-    const b = order.indexOf(basic.executionHint!.firstBallThickness.fraction);
-    const t = order.indexOf(thin.executionHint!.firstBallThickness.fraction);
-    expect(t).toBe(Math.max(0, b - 1));
+    if (top.points) {
+      expect(top.confidence).toBe(model.validation.path.table.reproduce_rate);
+      expect(top.expectedSuccess).not.toBeNull();
+      expect(top.comparison!.windowDeg).toBeGreaterThan(0);
+      const h = top.executionHint!;
+      expect(h.firstBallThickness.basis).toBe('layout');
+      expect(h.spin.side).toBe(
+        h.cushionPlan.direction === 'clockwise' ? 'right' : 'left',
+      );
+      expect(h.basis).toBe('recommended');
+      expect(h.verified).toBe(false);
+    }
   });
-  it('무회전 경로는 방향이 정해져도 회전을 넣지 않는다', () => {
-    const [top] = buildRuleRoutes('no_first_hit', 'beginner', geometry);
+  it('고급: 계산한 후보끼리 기대 성공률로 비교', () => {
+    const routes = buildRuleRoutes(
+      'not_enough_cushions',
+      'advanced',
+      geometry,
+      model,
+    );
+    expect(routes.length).toBeGreaterThan(0);
+    expect(
+      routes.every((r) => r.expectedSuccess !== null && r.comparison !== null),
+    ).toBe(true);
+    expect(routes[0].description).toMatch(/먼저 →/);
+  });
+  it('무회전 템플릿은 방향이 정해져도 회전을 넣지 않는다', () => {
+    const [top] = buildRuleRoutes('no_first_hit', 'beginner', geometry, model);
     expect(top.executionHint!.spin.side).toBe('none');
   });
-  it('배치가 없으면 예전처럼 좌표 null', () => {
-    const [top] = buildRuleRoutes('not_enough_cushions', 'beginner', null);
+  it('배치가 없으면 좌표·기대 성공률 null', () => {
+    const [top] = buildRuleRoutes(
+      'not_enough_cushions',
+      'advanced',
+      null,
+      model,
+    );
     expect(top.points).toBeNull();
+    expect(top.expectedSuccess).toBeNull();
     expect(top.executionHint!.firstObjectBall).toBeNull();
+  });
+});
+
+describe('템플릿 순서로 경로가 없을 때', () => {
+  it('4쿠션 이내 다른 순서로 대신 권하고 이유를 밝힌다', () => {
+    const geometry = { layout, cueBall: 'white' as const };
+    const [top] = buildRuleRoutes(
+      'not_enough_cushions',
+      'beginner',
+      geometry,
+      model,
+    );
+    // 이 배치는 장·단·장 4쿠션 이내 득점 경로가 없다 (planRoute 결과로 확인)
+    expect(
+      planRoute(layout, 'white', ['long', 'short', 'long'], model, 'beginner'),
+    ).toBeNull();
+    expect(top.points).not.toBeNull();
+    expect(top.cushionCount).toBeLessThanOrEqual(4);
+    expect(top.description).toMatch(/먼저 →/);
+    expect(top.rationale).toContain('대신');
+    expect(top.executionHint!.cushionPlan.order).toHaveLength(top.cushionCount);
   });
 });

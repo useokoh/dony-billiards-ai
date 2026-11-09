@@ -84,6 +84,28 @@ export default function TableView({ trajectory, route, loading }: Props) {
           </g>
         )}
 
+        {/* 추천 경로의 예상 정지 위치 (점선 원): 1적구는 실측 이동 거리로 추정, 수구는 두 번째 목적구 접점 */}
+        {route?.comparison && route.executionHint?.firstObjectBall && (
+          <g fill="none" strokeDasharray="5 5" strokeWidth="2.5">
+            <circle
+              cx={px(route.comparison.nextLayout.objectBallEnd)[0]}
+              cy={px(route.comparison.nextLayout.objectBallEnd)[1]}
+              r={R}
+              stroke={BALL_COLOR[route.executionHint.firstObjectBall]}
+            >
+              <title>1적구 예상 정지 위치 (참고)</title>
+            </circle>
+            <circle
+              cx={px(route.comparison.nextLayout.cueEnd)[0]}
+              cy={px(route.comparison.nextLayout.cueEnd)[1]}
+              r={R}
+              stroke="var(--accent)"
+            >
+              <title>수구 예상 위치 (두 번째 목적구 접점)</title>
+            </circle>
+          </g>
+        )}
+
         {/* 공: 시작 위치(진하게), 멈춘 위치(옅게) */}
         {balls &&
           BALLS.map((b) => {
@@ -107,7 +129,7 @@ export default function TableView({ trajectory, route, loading }: Props) {
           : !balls
             ? "이 샷은 궤적 데이터가 없습니다"
             : routePts
-              ? "실선: 실제 경로 · 점선: 추천 경로(무회전 기준 계산, 참고용) · 숫자: 쿠션 순서"
+              ? "실선: 실제 경로 · 점선: 추천 경로(실측 보정 계산, 참고용) · 숫자: 쿠션 순서 · 점선 원: 예상 정지 위치"
               : "실선: 실제 경로 · 진한 공: 시작 위치 · 옅은 공: 멈춘 위치"}
       </figcaption>
     </figure>

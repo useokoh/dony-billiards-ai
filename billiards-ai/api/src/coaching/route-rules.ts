@@ -1,9 +1,9 @@
 // 규칙 기반 추천 경로·실행 코칭 예시 생성기 (순수 함수, DB 없음)
 //
-// 입력: 샷의 실패 유형 + 코칭 난이도. 출력: 난이도에 맞는 추천 경로 목록(권장 실행값 포함).
-// 한계: 공 시작 위치(궤적)를 아직 쓰지 않으므로 경로 좌표(points)와 진행 방향(direction)은
-// 정하지 않는다. 쿠션 순서·두께·회전·강약은 "이 실패 유형에서 일반적으로 시도해 볼 만한 예시"이며
-// 실제 사용값을 판정한 것이 아니다 (docs/기술스택.md 3.3).
+// 입력: 샷의 실패 유형 + 코칭 난이도 (+ 샷 시작 배치). 출력: 난이도에 맞는 추천 경로 목록(권장 실행값 포함).
+// 배치가 있으면 실측 보정 모델로 굴려 본 좌표·두께·방향·세기·기대 성공률을 채운다 (route-geometry.ts).
+// 배치가 없으면 "이 실패 유형에서 일반적으로 시도해 볼 만한 예시"만 준다.
+// 어느 쪽도 실제 사용한 회전·힘을 판정한 값이 아니다 (Docs/기술스택.md 3.3).
 import type { BallName, Layout } from '../trajectory/trajectory.js';
 import {
   LEVEL_HANDICAP_LABEL,
@@ -19,7 +19,12 @@ import {
   type Thickness,
   type TipHeight,
 } from './coaching.types.js';
-import { planRoute, type PlannedRoute } from './route-geometry.js';
+import {
+  planAlternatives,
+  planRoute,
+  type PlannedRoute,
+} from './route-geometry.js';
+import { loadRouteModel, type RouteModel } from './route-model.js';
 
 /** DB의 shot 필드를 실패 유형으로 바꾼다. 실패가 아니면 null */
 export function classifyFailure(shot: {
@@ -73,8 +78,8 @@ const AMOUNT_LABEL: Record<SpinAmount, string> = {
   strong: '강하게',
 };
 const STRENGTH_LABEL: Record<Strength, string> = {
-  soft: '약하게(부드럽게)',
-  medium: '보통 세기',
+  soft: '약하게',
+  medium: '보통',
   firm: '강하게',
 };
 
@@ -124,9 +129,7 @@ export function makeHint(spec: HintSpec, plan?: PlannedRoute): ExecutionHint {
     secondObjectBall: plan?.secondObjectBall ?? null,
     firstBallThickness: {
       fraction: spec.thickness,
-      label: plan
-        ? `${THICKNESS_LABEL[spec.thickness]} (배치 계산, 무회전 기준)`
-        : THICKNESS_LABEL[spec.thickness],
+      label: THICKNESS_LABEL[spec.thickness],
       basis: plan ? 'layout' : 'template',
       deflectionDeg: plan?.deflectionDeg ?? null,
     },
@@ -143,7 +146,10 @@ export function makeHint(spec: HintSpec, plan?: PlannedRoute): ExecutionHint {
         ? `회전 없이 ${TIP_LABEL[spec.tip]} 당점`
         : `${SIDE_LABEL[side]} 계열 ${AMOUNT_LABEL[spec.amount]}, ${TIP_LABEL[spec.tip]} 당점`,
     },
-    strength: { level: spec.strength, label: STRENGTH_LABEL[spec.strength] },
+    strength: {
+      level: plan?.strength ?? spec.strength,
+      label: STRENGTH_LABEL[plan?.strength ?? spec.strength],
+    },
     basis: 'recommended',
     verified: false,
   };
@@ -378,49 +384,142 @@ const TEMPLATES: Record<FailureKind, Record<CoachingLevel, Template[]>> = {
   },
 };
 
-/** 배치로 계산한 경로의 신뢰도: 무회전 이상 경로라 낮게 둔다 */
-const GEOMETRY_CONFIDENCE = 0.35;
-
 export interface ShotGeometry {
   layout: Layout;
   cueBall: BallName;
 }
 
+const RAIL_ORDER_LABEL: Record<RailKind, string> = { long: '장', short: '단' };
+const RATING_LABEL = { good: '모여 있음', normal: '보통', hard: '흩어짐' };
+
+/** 배치로 계산한 경로 → 응답의 좌표·비교 값 */
+function geometryFields(plan: PlannedRoute, model: RouteModel) {
+  return {
+    points: plan.points,
+    pointsBasis: 'simulated' as const,
+    confidence: model.validation.path.table.reproduce_rate,
+    expectedSuccess: plan.expectedSuccess,
+    comparison: {
+      windowDeg: plan.windowDeg,
+      cutDeg: plan.cutDeg,
+      pathLengthM: Math.round(plan.lengthPx * (2.84 / 1480) * 10) / 10,
+      nextLayout: plan.nextLayout,
+    },
+  };
+}
+
+function planSentence(plan: PlannedRoute): string {
+  return `샷 시작 배치로 계산하면 ${BALL_LABEL[plan.firstObjectBall]}을 자르는 각 약 ${plan.cutDeg}°(허용 폭 ${plan.windowDeg}°)로 맞혀 수구가 약 ${plan.deflectionDeg}° 꺾여 ${BALL_LABEL[plan.secondObjectBall]}으로 갑니다.`;
+}
+
+/** 고급: 쿠션 순서·첫 목적구가 다른 후보를 기대 성공률로 비교 (템플릿 대신 계산 결과로 만든다) */
+function advancedRoutes(
+  geometry: ShotGeometry,
+  model: RouteModel,
+): RecommendedRouteDto[] {
+  return planAlternatives(
+    geometry.layout,
+    geometry.cueBall,
+    model,
+    'advanced',
+  ).map((plan, i) => {
+    const order = plan.rails.map(
+      (r) => (r === 'top' || r === 'bottom' ? 'long' : 'short') as RailKind,
+    );
+    const difficulty: CoachingLevel =
+      plan.expectedSuccess >= 0.5
+        ? 'beginner'
+        : plan.expectedSuccess >= 0.25
+          ? 'intermediate'
+          : 'advanced';
+    const spec: HintSpec = {
+      thickness: plan.thickness,
+      order,
+      side: 'right',
+      tip: 'center',
+      amount: plan.windowDeg >= 3 ? 'light' : 'medium',
+      strength: plan.strength,
+    };
+    return {
+      rank: i + 1,
+      difficulty,
+      description: `${BALL_LABEL[plan.firstObjectBall]} 먼저 → ${order.map((k) => RAIL_ORDER_LABEL[k]).join('·')} ${order.length}쿠션 → ${BALL_LABEL[plan.secondObjectBall]}`,
+      cushionCount: order.length,
+      source: 'rule_template' as const,
+      rationale: `${planSentence(plan)} 기대 성공률 ${Math.round(plan.expectedSuccess * 100)}%, 다음 배치는 ${RATING_LABEL[plan.nextLayout.rating]}(세 공 최대 거리 ${plan.nextLayout.spreadM}m) 예상입니다.`,
+      executionHint: makeHint(spec, plan),
+      ...geometryFields(plan, model),
+    };
+  });
+}
+
 /**
  * 실패 유형과 난이도에 맞는 추천 경로 (rank 1부터).
- * 샷 시작 배치(geometry)가 있으면 경로 좌표·첫 목적구·두께·진행 방향·회전 방향을 계산해 채운다.
- * 계산할 수 없는 경로(배치상 불가능)는 규칙 예시 값 그대로 둔다.
+ * 샷 시작 배치(geometry)가 있으면 실측 보정 모델로 굴려 좌표·첫 목적구·두께·방향·강약·기대 성공률을 채운다.
+ * 고급은 배치가 있으면 계산한 후보끼리 비교하고, 없으면 규칙 예시를 쓴다.
  */
 export function buildRuleRoutes(
   failure: FailureKind,
   level: CoachingLevel,
   geometry?: ShotGeometry | null,
+  model: RouteModel = loadRouteModel(),
 ): RecommendedRouteDto[] {
+  if (level === 'advanced' && geometry) {
+    const routes = advancedRoutes(geometry, model);
+    if (routes.length > 0) return routes;
+  }
   return TEMPLATES[failure][level].map((t, i) => {
-    const plan = geometry
-      ? planRoute(geometry.layout, geometry.cueBall, t.hint.order)
+    let plan = geometry
+      ? planRoute(geometry.layout, geometry.cueBall, t.hint.order, model, level)
       : null;
+    // 이 배치에서 템플릿 순서로 득점 경로가 없으면, 4쿠션 이내에서 기대 성공률이 가장 높은 다른 순서를 권한다
+    let replaced = false;
+    if (!plan && geometry && t.hint.order.length > 0) {
+      plan = planRoute(geometry.layout, geometry.cueBall, [], model, level, 4);
+      replaced = plan !== null;
+    }
+    const order: RailKind[] =
+      plan && replaced
+        ? plan.rails.map((r) =>
+            r === 'top' || r === 'bottom' ? 'long' : 'short',
+          )
+        : t.hint.order;
     const spec = plan
       ? {
           ...t.hint,
+          order,
           thickness: shiftThickness(plan.thickness, t.thicknessShift ?? 0),
         }
       : t.hint;
-    const rationale = plan
-      ? `${t.rationale} 샷 시작 배치로 계산하면 ${BALL_LABEL[plan.firstObjectBall]}을 먼저 맞히고 수구가 약 ${plan.deflectionDeg}° 꺾여 ${BALL_LABEL[plan.secondObjectBall]}로 가는 경로가 가장 짧습니다.`
-      : t.rationale;
-    return {
+    const templateOrder = t.hint.order
+      .map((k) => RAIL_ORDER_LABEL[k])
+      .join('·');
+    const base = {
       rank: i + 1,
       difficulty: t.difficulty,
-      description: t.description,
-      cushionCount: t.hint.order.length,
-      points: plan?.points ?? null,
-      pointsBasis: plan ? ('mirror_geometry' as const) : null,
-      confidence: plan ? GEOMETRY_CONFIDENCE : null,
+      description:
+        plan && replaced
+          ? `${BALL_LABEL[plan.firstObjectBall]} 먼저 → ${order.map((k) => RAIL_ORDER_LABEL[k]).join('·')} ${order.length}쿠션 → ${BALL_LABEL[plan.secondObjectBall]}`
+          : t.description,
+      cushionCount: order.length,
       source: 'rule_template' as const,
-      rationale,
+      rationale: plan
+        ? replaced
+          ? `이 배치에서는 ${templateOrder} 순서로 4쿠션 안에 득점하는 경로가 계산되지 않아 대신 이 경로를 권합니다. ${planSentence(plan)}`
+          : `${t.rationale} ${planSentence(plan)}`
+        : t.rationale,
       executionHint: makeHint(spec, plan ?? undefined),
     };
+    return plan
+      ? { ...base, ...geometryFields(plan, model) }
+      : {
+          ...base,
+          points: null,
+          pointsBasis: null,
+          confidence: null,
+          expectedSuccess: null,
+          comparison: null,
+        };
   });
 }
 
@@ -469,7 +568,11 @@ export function buildFeedbackItems(
     items.push(
       item(
         'execution',
-        `권장 실행: ${first} ${hint.firstBallThickness.label}로 맞히고, ${hint.spin.label}, ${hint.strength.label}를 시도해 보세요. (권장값이며 실제 회전·힘을 판정한 것은 아닙니다)`,
+        `권장 실행: ${first} ${hint.firstBallThickness.label}로 맞히고, ${hint.spin.label}, 세기는 ${hint.strength.label} 쳐 보세요. (${
+          hint.firstBallThickness.basis === 'layout'
+            ? '두께·방향·세기는 샷 시작 배치와 이 당구대 실측 모델로 계산한 권장값이며, '
+            : '권장값이며 '
+        }실제 회전·힘을 판정한 것은 아닙니다)`,
       ),
     );
   }
@@ -478,12 +581,19 @@ export function buildFeedbackItems(
   }
   if (level === 'advanced' && routes.length > 1) {
     const compare = routes
-      .map((r) => `${r.rank}순위 ${r.description}`)
+      .map((r) =>
+        r.expectedSuccess !== null && r.comparison
+          ? `${r.rank}순위 ${r.description}: 기대 성공률 ${Math.round(r.expectedSuccess * 100)}%, 허용 폭 ${r.comparison.windowDeg}°, 다음 배치 ${RATING_LABEL[r.comparison.nextLayout.rating]}`
+          : `${r.rank}순위 ${r.description}`,
+      )
       .join(' / ');
+    const computed = routes.some((r) => r.expectedSuccess !== null);
     items.push(
       item(
         'summary',
-        `후보 비교: ${compare}. 기대 성공률과 다음 배치까지의 이득은 공 시작 위치 데이터가 연결된 뒤 계산합니다.`,
+        computed
+          ? `후보 비교: ${compare}. 기대 성공률은 실측 보정 모델에 고급 실행 오차 가정을 넣어 굴려 본 값이고, 다음 배치는 1적구 이동 거리 실측 중앙값으로 추정한 참고값입니다.`
+          : `후보 비교: ${compare}. 샷 시작 배치가 없어 기대 성공률과 다음 배치는 계산하지 못했습니다.`,
       ),
     );
   }

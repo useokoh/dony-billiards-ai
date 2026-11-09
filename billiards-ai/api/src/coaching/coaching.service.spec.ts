@@ -120,14 +120,16 @@ describe('CoachingService', () => {
         t('red', [0.8, 0.3]),
       ],
     });
-    const r = await service.route(1, { level: 'beginner' });
+    const r = await service.route(1, { level: 'advanced' });
     expect(r.layout).toEqual({
       white: [0.2, 0.7],
       yellow: [0.45, 0.5],
       red: [0.8, 0.3],
     });
-    expect(r.routes[0].pointsBasis).toBe('mirror_geometry');
-    expect(r.routes[0].points).toHaveLength(6);
+    expect(r.routes[0].pointsBasis).toBe('simulated');
+    const pts = r.routes[0].points!;
+    expect(pts.length).toBeGreaterThanOrEqual(6); // 수구, 접점, 쿠션 3~4, 두 번째 목적구
+    expect(pts.length).toBeLessThanOrEqual(7);
   });
 
   it('성공·미확정 샷은 추천 대상이 아니다', async () => {
