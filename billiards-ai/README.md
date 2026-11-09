@@ -85,9 +85,25 @@ cd web && npm run dev
 
 결과는 `data/results/clips/영상이름/`에 저장됩니다. 예: `이닝003_선공_샷02_045.mp4`
 
+## 득점 자동 확정 (⑨)
+
+`analyzer.shots`가 샷마다 득점·실패와 실패 원인, 판정 근거·신뢰도를 함께 저장합니다. 공 움직임(쿠션·충돌 순서)과 차례 신호(득점하면 같은 선수가 이어 침)를 합쳐 판정합니다. 이미 만든 결과에 다시 붙일 때만 따로 실행합니다.
+
+```bash
+.venv/bin/python -m analyzer.judge data/videos/영상파일.MP4
+```
+
+## 샷별 궤적 (경로 그림·추천 경로 계산용)
+
+```bash
+.venv/bin/python -m analyzer.trajectory data/videos/영상파일.MP4
+```
+
+결과는 `data/results/trajectories/영상이름.json`(영상 1개당 약 1MB)입니다.
+
 ## 분석 결과를 DB에 저장
 
-`data/results/shots/*.json`을 SQLite(`data/billiards.db`)에 넣는다. 같은 영상을 다시 넣으면 이전 기록을 지우고 새로 저장한다.
+`data/results/shots/*.json`(있으면 궤적 JSON도)을 SQLite(`data/billiards.db`)에 넣는다. 같은 영상을 다시 넣으면 이전 기록을 지우고 새로 저장하되, 사람이 확인한 득점 값과 경기에 연결한 선수는 옮긴다.
 
 ```bash
 cd api

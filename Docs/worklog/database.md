@@ -1,5 +1,55 @@
 # 데이터베이스
 
+## 2026-11-09 궤적 저장, 선수 연결, 배치 기반 추천 경로
+- 한 일: 가져오기가 `data/results/trajectories/*.json`을 `trajectories` 테이블에 넣는다(실제 DB 657행 = 219샷 × 공 3개). `GET /api/shots/:id/trajectory`를 만들었다. 경기에 선공·후공 선수를 연결하는 `first_player_id`, `second_player_id`(마이그레이션 `20261109040000_match_players`)와 `PATCH /api/matches/:id/players`를 만들었다. 코칭 요청에 난이도가 없으면 그 샷을 친 선수의 목표 핸디를 쓴다.
+- 추천 경로 좌표: `api/src/coaching/route-geometry.ts`. 샷 시작 배치에서 거울 반사로 첫 목적구 → 쿠션 3개 → 두 번째 목적구 경로를 구하고(꺾임 80° 이하 중 가장 짧은 것), 먼저 맞힐 공·두께(무회전 기준)·진행 방향·순회전 방향을 채운다. 신뢰도 0.35로 표시한다.
+- 결정과 이유:
+  - 사용자가 남은 작업 "전부"를 선택했다. 궤적이 있어야 좌표·방향을 계산할 수 있어 궤적 → 경로 계산 → 선수 연결 → 웹 → 문서 순으로 했다.
+  - 다시 가져오기 때 경기에 연결한 선수도 옮긴다(사람 확인과 같은 방식).
+  - 연결된 선수 프로필이 지워졌으면 404 대신 기본값(초급)으로 코칭한다. 요청에 직접 준 `playerId`가 없으면 404다.
+- 문제와 해결: 외래 키 추가로 SQLite가 `matches`를 다시 만든다(Prisma 표준). 사본에서 경기·샷·사건·영상·이닝 수와 점수가 그대로인 것을 확인한 뒤 적용했다.
+- 바뀐 파일: `api/prisma/`, `api/src/trajectory/`(새로 만듦), `api/src/coaching/`, `api/src/matches/`, `api/src/shots/`, `api/src/results-import/`, `Docs/기술스택.md` 3.4·4·5·6장, `billiards-ai/README.md`
+- 확인 결과:
+  - API 테스트 127개, lint 경고 0, 빌드 통과
+  - 적용 전 백업: `data/billiards.backup-20261109-before-trajectory.db`. 경기 번호가 7(영상1), 8(영상2)로 바뀌었다. 점수 32:22, 26:32와 사람 확인 3개 유지
+  - 실패 샷 107개: 초급 1순위 경로 79개, 고급 후보 321개 중 255개가 배치로 계산됨. 나머지는 좌표 없이 규칙 예시
+  - 사본 DB에서 선수 연결 → 선공(목표 20) 샷은 초급 1개, 후공(목표 30) 샷은 고급 3개 경로. 같은 선수 양쪽 400
+  - 확인하지 않은 것: 계산한 추천 경로가 실제로 칠 만한 경로인지 사람이 본 적 없음
+
+## 2026-11-09 득점 자동 확정 반영과 사람 확인 보존
+- 한 일: 샷에 `score_basis`(판정 근거), `score_confidence`(신뢰도) 컬럼을 추가했다(마이그레이션 `20261109030000_auto_score`, 코칭 마이그레이션 `20261109020000_coaching_levels`와 함께 실제 DB에 적용). 가져오기가 분석기의 `result`·`fail_reason`을 저장한다. 점수는 **사람 확인 > 자동 확정** 규칙으로 이닝별·경기 전체를 다시 센다(`api/src/scoring/score.ts`). 조회 응답에 `scored`(최종 득점), `scoredBy`(human/auto/none)를 추가했다.
+- 결정과 이유:
+  - 사용자가 "득점 여부를 자동으로 확정"하도록 지시했다. 사람 확인은 자동 판정을 바로잡는 용도로 남긴다. `PATCH scoreConfirmed: null`은 자동 판정으로 되돌린다.
+  - 다시 가져오기 때 사람이 확인한 값을 **시작 프레임 기준으로 옮긴다**(샷 번호는 바뀔 수 있음). 이전 기록의 "인정 기록이 사라진다" 문제를 해결했다.
+- 바뀐 파일: `api/prisma/schema.prisma`, `api/prisma/migrations/20261109030000_auto_score/`, `api/src/scoring/`(새로 만듦), `api/src/shots/shots.service.ts`, `api/src/matches/matches.service.ts`, `api/src/results-import/`, `api/src/cli/import-results.ts`, 웹 `web/src/lib/api.ts`, `web/src/lib/shot-text.ts`, `web/src/components/match/MatchDetail.tsx`, `ShotFeedback.tsx`, `web/src/app/page.tsx`
+- 확인 결과:
+  - API 테스트 99개, lint, 빌드, 웹 tsc·lint·빌드 통과
+  - 사본 DB로 먼저 해 본 뒤 실제 DB에 적용했다. 적용 전 백업: `data/billiards.backup-20261109-before-auto-score.db`
+  - 실제 DB: 경기 5(영상1) 32:22, 경기 6(영상2) 26:32. 판정 전(unknown) 샷 0개. 기존 사람 확인 3개가 유지됨(못 옮김 0). 경기 번호가 5, 6으로 바뀜
+  - 사본 DB에서 불인정 1건 → 다시 가져오기 → 유지되고 점수에 반영(32:22 → 31:22)
+  - 실패 샷의 코칭 API가 이제 실제 데이터에서 동작한다(`applicable: true`)
+  - 확인하지 않은 것: 브라우저·휴대폰에서 바뀐 화면 표시
+
+## 2026-11-09 목표 핸디별 실패 샷 코칭 기반
+- 한 일: 플레이어의 현재·목표 핸디와 코칭 난이도를 저장하는 `players` 테이블을 추가하고, 추천 경로에 난이도·구조화된 실행 힌트·신뢰도를, 피드백에 목표 핸디를 추가했다. `GET /api/shots/:id/route`, `GET /api/shots/:id/feedback`, 플레이어 CRUD API를 구현했다.
+- 결정과 이유:
+  - 난이도는 목표 핸디 **20 이하=초급, 21~27=중급, 28 이상=고급**으로 정했다. 요청의 `level`·`handicap`·`playerId` 순으로 결정하며, 값이 없으면 초급으로 안전하게 시작한다.
+  - 실행 힌트는 첫 목적구 두께, 쿠션 순서·방향, 권장 회전 방향·회전량, 당점, 강약을 구조화해 돌려준다. 다만 영상만으로 실제 회전·힘을 판정할 수 없으므로 항상 `recommended`·`verified: false`로 표시한다.
+  - 추천은 실패 샷에서만 제공한다. DB에 계산된 추천 경로가 있으면 그것을 우선 쓰고, 없으면 실패 유형과 난이도에 따른 규칙 기반 예시를 제공한다.
+- 바뀐 파일: `api/prisma/schema.prisma`, `api/prisma/migrations/20261109020000_coaching_levels/`, `api/src/coaching/`, `api/src/players/`, `api/src/app.module.ts`
+- 확인 결과: 실제 SQLite DB에 마이그레이션을 적용했다. API 단위 테스트 91개, lint, Nest 빌드가 통과했다. 사본 DB에서 목표 핸디 20·27·30에 따라 추천 경로 수가 1·2·3개로 달라지고, 성공 샷에는 추천하지 않는 것을 확인했다.
+- 남은 일: 실제 분석 샷 219개가 모두 `result=unknown`이라 현재는 코칭 대상이 아니다. 실패 원인 판정(기술스택 8장 5단계), 궤적 기반 실제 경로 좌표·방향 계산, 경기/샷과 플레이어 ID 연결, 웹 화면 연결이 필요하다.
+
+## 2026-11-09 득점 인정 API와 목록 득점 후보 수
+- 한 일: `PATCH /api/shots/:id`(본문 `{"scoreConfirmed": true|false|null}`)를 만들었다. 저장하면서 그 이닝과 경기의 선공·후공 점수를 인정된 샷 수로 다시 계산한다(트랜잭션). 경기 목록 응답에 `candidateCount`(득점 후보 수)를 추가했다.
+- 결정과 이유:
+  - null은 확인 취소다. 화면에서 이미 누른 버튼을 다시 누르면 취소된다.
+  - 득점 후보가 아닌 샷도 API로는 인정할 수 있게 했다. 분석기가 놓친 득점을 바로잡기 위해서다. 화면에는 후보이거나 이미 확인한 샷에만 버튼을 보여 준다.
+  - class-validator가 없어서 본문 검사는 `parseConfirmBody`로 직접 한다. 잘못된 값이면 400을 돌려준다.
+- 바뀐 파일: `api/src/shots/`(service, controller, spec), `api/src/matches/matches.service.ts`(+spec)
+- 확인 결과: 단위 테스트 19개 통과. DB 사본으로 띄운 서버에서 인정 → 1:0, 두 번째 인정 → 2:0, 불인정 → 1:0, 취소 → 0:0, 다른 이닝 샷 반영, 400·404를 확인했다. 실제 DB의 확정 샷은 0개 그대로다.
+- 주의: 분석 결과를 다시 가져오면(`import:results`) 경기를 지우고 새로 넣으므로, **사람이 인정한 기록도 사라진다.** 다시 가져오기 전에 보존 방법을 정해야 한다.
+
 ## 2026-11-09 조회 API와 영상 재생 API (B안)
 - 한 일: 경기 목록·경기 정보·이닝별 샷·샷 상세 조회 API와 영상 재생 API 2개를 만들었다. 경기는 `api/src/matches/`, 샷은 `api/src/shots/`, 영상 전송 공통 코드는 `api/src/media/`에 있다.
 - 결정과 이유:

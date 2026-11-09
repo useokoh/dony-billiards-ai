@@ -1,5 +1,13 @@
 # 개발 환경
 
+## 2026-11-09 저장소 공개 전환과 커밋 이메일 변경
+- 한 일: 사용자 요청으로 `dony-billiards-ai`를 공개(Public)로 바꿨다. 이어서 커밋 3개의 작성자 이메일을 GitHub noreply 주소(`277463901+useokoh@users.noreply.github.com`)로 바꿔 덮어썼다(force push).
+- 결정과 이유: 공개 전 점검에서 실제 키·비밀번호는 없었다(걸린 것은 Prisma 설명서 예시뿐). 사용자는 이메일·창업기획서·worklog 공개를 알고 "그대로 공개"를 골랐고, 이후 이메일만 숨기기로 했다.
+- 방법: 작업 폴더(다른 창이 작업 중)는 건드리지 않았다. 별도 clone에서 `git filter-branch --env-filter`로 이메일만 바꾸고, `--force-with-lease=main:40a7085`로 GitHub이 그대로일 때만 덮어썼다. 작업 폴더는 `git update-ref`로 새 이력을 가리키게 했다. 트리가 같아서 작업 중인 파일은 바뀌지 않았다.
+- 커밋 번호 대응: `b12a06a` → `fc110ec`, `ff9e9ff` → `bc54fdf`, `40a7085` → `1f5e50b` (이전 기록에 적힌 번호는 예전 번호다)
+- 설정: 이 저장소의 `user.email`을 noreply 주소로 지정했다(전역 `~/.gitconfig`는 그대로).
+- 확인 결과: GitHub 커밋 3개 모두 noreply 주소, 로그인 없이 저장소 접속 200. 공개되어 있던 동안의 복사본·캐시는 지울 수 없다. GitHub Settings → Emails의 "Keep my email addresses private", "Block command line pushes that expose my email"은 사용자가 웹에서 켜야 한다(확인 안 됨).
+
 ## 2026-11-09 T3code에서 재검증 (ff9e9ff 기준)
 - 한 일: CLI 작업을 T3code로 넘겨받아 GitHub에서 새로 clone해 다시 설치·빌드·테스트했다.
 - 확인 결과: API 빌드와 테스트 7개 통과, 웹은 `.next`를 지운 빌드가 글꼴 오류 없이 통과했다. 분석기는 영상과 분석 결과 없이 50개 통과·13개 건너뜀이고, `data/videos`와 `data/results`를 연결하면 63개 모두 통과한다. 분석 결과 폴더 이름은 `output`이 아니라 `data/results`다.
