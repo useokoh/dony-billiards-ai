@@ -22,7 +22,21 @@ function ballAhead(from: [number, number], to: [number, number]) {
   const len = Math.hypot(dx, dy);
   const ux = dx / len;
   const uy = dy / len;
-  return { x: to[0] + ux * BALL_R * 2, y: to[1] + uy * BALL_R * 2, ux, uy };
+  return {
+    x: round3(to[0] + ux * BALL_R * 2),
+    y: round3(to[1] + uy * BALL_R * 2),
+    ux,
+    uy,
+  };
+}
+
+/**
+ * 소수 셋째 자리 반올림.
+ * Math.hypot은 서버(Node)와 브라우저에서 마지막 자리가 다를 수 있어, 그대로 쓰면
+ * 서버 HTML의 cx/cy와 브라우저 값이 달라 hydration 경고가 난다. 반올림해 같은 값으로 맞춘다.
+ */
+function round3(v: number) {
+  return Math.round(v * 1000) / 1000;
 }
 
 export const RED = ballAhead(CUE_PATH[0], CUE_PATH[1]);
