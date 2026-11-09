@@ -20,7 +20,7 @@ brew install ffmpeg
 python3 -m venv .venv && .venv/bin/pip install -r analyzer/requirements.txt
 ```
 ```bash
-cd api && cp .env.example .env && npm install && npx prisma migrate dev
+cd api && cp .env.example .env && npm install && npx prisma migrate deploy
 ```
 ```bash
 cd web && npm install

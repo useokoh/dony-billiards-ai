@@ -1,5 +1,20 @@
 # 개발 환경
 
+## 2026-11-09 새로 받은 저장소로 설치 검증 (T3code 준비)
+- 한 일: 사용자가 T3code를 이 Mac에서 쓰기로 해서 `~/DSTITCLASS`를 그대로 쓰기로 했다. 새 컴퓨터 기준으로 설치가 되는지 임시 폴더에 clone해서 Python 환경, API 설치·DB 생성·빌드·테스트, 웹 설치·빌드, 영상·분석 결과 연결 후 분석기 테스트까지 확인하고 임시 폴더는 지웠다.
+- 문제와 해결:
+  - `billiards-ai/.gitignore`의 `data/`가 `analyzer/tests/data/reviewed_shots.json`까지 제외해서 clone하면 분석기 테스트가 실패했다. 최상위만 빼도록 `/data/`로 고쳤다.
+  - 새로 설치하면 웹 빌드가 실패했다. IBM Plex Sans KR은 글꼴 파일이 100개 넘게 나뉘어 있어 빌드 중 일부 내려받기가 실패한다. 스플래시 로고 글꼴을 영문 IBM Plex Sans로 바꿨다(영문 글자 모양은 같음). 한글 부제는 시스템 한글 글꼴로 표시된다.
+  - README 첫 설치 명령을 `prisma migrate dev`(대화형)에서 `prisma migrate deploy`로 바꿨다.
+- 바뀐 파일: `billiards-ai/.gitignore`, `billiards-ai/web/src/components/splash/Splash.tsx`, `billiards-ai/README.md`
+- 확인 결과: clone 기준 API 테스트 7개, 분석기 테스트 63개 통과. 웹은 캐시를 지운 빌드 2번 모두 글꼴 오류 없이 통과. 로고 화면 캡처 정상. `data/` 폴더는 migrate deploy가 자동으로 만든다. 이 수정은 아직 커밋·푸시하지 않았다.
+
+## 2026-11-09 GitHub 비공개 저장소에 첫 푸시
+- 한 일: `DSTITCLASS` 폴더를 Git 저장소로 만들고 https://github.com/useokoh/dony-billiards-ai (비공개, main)에 첫 커밋을 푸시했다. T3code 작업 환경 구축용이다.
+- 결정과 이유: 사용자가 비공개, 코드 + 기획 문서, 저장소 이름 `dony-billiards-ai`를 골랐다. 루트 `.gitignore`로 `Project/`, `slides/`, `Docs/Sauce/`(원본 영상)를 제외했다. 다른 회사 IR PDF와 100MB 넘는 영상은 올리지 않는다.
+- 바뀐 파일: `.gitignore`(새로 만듦), `billiards-ai/.gitignore`(`*.tsbuildinfo` 추가)
+- 확인 결과: 파일 176개. `.env`, DB, 영상, node_modules, Prisma 생성 코드는 포함되지 않았고 키·토큰·이메일 검사도 통과했다. 새 컴퓨터에서 다시 설치하는 과정은 확인하지 않았다(`data/` 영상·DB·분석 결과는 저장소에 없음).
+
 ## 2026-11-09 "백엔드에 연결하지 못했습니다" 원인 확인
 - 문제와 해결: 웹(3000번)만 켜져 있고 api 서버(4000번)가 꺼져 있었다. 주소 설정은 웹·api 모두 4000번으로 일치해서 바꿀 것은 없었다. api를 켜면 해결된다(`api/`에서 `npm run start:dev`).
 - 확인 결과: 빌드된 api를 잠깐 실행해 `/api/health`에서 DB, OpenCV 5.0.0, FFmpeg 9.0.2 정상 응답을 받고 다시 껐다.

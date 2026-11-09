@@ -6,7 +6,7 @@
 // - 화면을 누르거나 "건너뛰기"를 누르면 바로 넘어간다
 // - 움직임 줄이기 설정이면 애니메이션 없이 로고만 잠깐 보여 준다
 import { useEffect, useRef, useState } from "react";
-import { IBM_Plex_Sans_KR } from "next/font/google";
+import { IBM_Plex_Sans } from "next/font/google";
 import styles from "./Splash.module.css";
 import {
   BALL_R,
@@ -23,7 +23,14 @@ import {
 } from "./timeline";
 import { SPLASH_KEY } from "./guard";
 
-const logoFont = IBM_Plex_Sans_KR({ weight: ["500", "700"], subsets: ["latin"] });
+// 로고는 영문이라 IBM Plex Sans(시안의 IBM Plex Sans KR과 영문 글자 모양이 같음)를 쓴다.
+// KR판은 글꼴 파일이 100개 넘게 나뉘어 있어 빌드 중 내려받기가 자주 실패했다.
+// 한글 부제는 시스템 한글 글꼴로 표시된다.
+const logoFont = IBM_Plex_Sans({
+  weight: ["500", "700"],
+  subsets: ["latin"],
+  fallback: ["Apple SD Gothic Neo", "Noto Sans KR", "sans-serif"],
+});
 
 const LOGO = "Dony";
 const SKIP_FADE_MS = 250;

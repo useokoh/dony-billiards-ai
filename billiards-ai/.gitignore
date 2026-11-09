@@ -1,5 +1,5 @@
 # 영상·DB·분석 결과
-data/
+/data/
 # Python
 .venv/
 __pycache__/
