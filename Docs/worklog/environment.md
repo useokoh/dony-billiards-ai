@@ -1,5 +1,9 @@
 # 개발 환경
 
+## 2026-11-09 T3code에서 재검증 (ff9e9ff 기준)
+- 한 일: CLI 작업을 T3code로 넘겨받아 GitHub에서 새로 clone해 다시 설치·빌드·테스트했다.
+- 확인 결과: API 빌드와 테스트 7개 통과, 웹은 `.next`를 지운 빌드가 글꼴 오류 없이 통과했다. 분석기는 영상과 분석 결과 없이 50개 통과·13개 건너뜀이고, `data/videos`와 `data/results`를 연결하면 63개 모두 통과한다. 분석 결과 폴더 이름은 `output`이 아니라 `data/results`다.
+
 ## 2026-11-09 새로 받은 저장소로 설치 검증 (T3code 준비)
 - 한 일: 사용자가 T3code를 이 Mac에서 쓰기로 해서 `~/DSTITCLASS`를 그대로 쓰기로 했다. 새 컴퓨터 기준으로 설치가 되는지 임시 폴더에 clone해서 Python 환경, API 설치·DB 생성·빌드·테스트, 웹 설치·빌드, 영상·분석 결과 연결 후 분석기 테스트까지 확인하고 임시 폴더는 지웠다.
 - 문제와 해결:
@@ -7,7 +11,7 @@
   - 새로 설치하면 웹 빌드가 실패했다. IBM Plex Sans KR은 글꼴 파일이 100개 넘게 나뉘어 있어 빌드 중 일부 내려받기가 실패한다. 스플래시 로고 글꼴을 영문 IBM Plex Sans로 바꿨다(영문 글자 모양은 같음). 한글 부제는 시스템 한글 글꼴로 표시된다.
   - README 첫 설치 명령을 `prisma migrate dev`(대화형)에서 `prisma migrate deploy`로 바꿨다.
 - 바뀐 파일: `billiards-ai/.gitignore`, `billiards-ai/web/src/components/splash/Splash.tsx`, `billiards-ai/README.md`
-- 확인 결과: clone 기준 API 테스트 7개, 분석기 테스트 63개 통과. 웹은 캐시를 지운 빌드 2번 모두 글꼴 오류 없이 통과. 로고 화면 캡처 정상. `data/` 폴더는 migrate deploy가 자동으로 만든다. 이 수정은 아직 커밋·푸시하지 않았다.
+- 확인 결과: clone 기준 API 테스트 7개, 분석기 테스트 63개 통과. 웹은 캐시를 지운 빌드 2번 모두 글꼴 오류 없이 통과. 로고 화면 캡처 정상. `data/` 폴더는 migrate deploy가 자동으로 만든다. 커밋 ff9e9ff로 푸시했다.
 
 ## 2026-11-09 GitHub 비공개 저장소에 첫 푸시
 - 한 일: `DSTITCLASS` 폴더를 Git 저장소로 만들고 https://github.com/useokoh/dony-billiards-ai (비공개, main)에 첫 커밋을 푸시했다. T3code 작업 환경 구축용이다.
