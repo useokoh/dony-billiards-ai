@@ -1,6 +1,10 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service.js';
-import { parseHitOrder, ShotsService } from './shots.service.js';
+import {
+  parseConfirmBody,
+  parseHitOrder,
+  ShotsService,
+} from './shots.service.js';
 
 describe('parseHitOrder', () => {
   it('JSON 배열을 바꾼다', () => {
@@ -35,6 +39,8 @@ describe('ShotsService', () => {
     failReason: null,
     scoreCandidate: true,
     scoreConfirmed: null,
+    scoreBasis: 'agree',
+    scoreConfidence: 0.95,
     inning: { inningNo: 2 },
     events: [{ seq: 1, kind: 'hit', frameNo: 120, tSec: 4, target: 'red' }],
     clip: null,
@@ -51,9 +57,66 @@ describe('ShotsService', () => {
     expect(s.inningNo).toBe(2);
     expect(s.hitOrder).toEqual(['red', 'yellow']);
     expect(s.clip).toBeNull();
+    expect(s).toMatchObject({
+      scored: true,
+      scoredBy: 'auto',
+      scoreBasis: 'agree',
+    });
     expect(s.matchVideo).toEqual({
       url: '/api/matches/3/video',
       startSec: 3.3,
+    });
+  });
+
+  it('득점 인정 후 자동 확정 + 사람 확인으로 점수를 다시 센다', async () => {
+    const tx = {
+      shot: {
+        update: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            inningId: 5,
+            player: 'first',
+            result: 'success',
+            scoreConfirmed: null,
+          },
+          {
+            inningId: 5,
+            player: 'second',
+            result: 'fail',
+            scoreConfirmed: true,
+          },
+          {
+            inningId: 6,
+            player: 'first',
+            result: 'success',
+            scoreConfirmed: false,
+          },
+        ]),
+      },
+      inning: { update: vi.fn() },
+      match: { update: vi.fn() },
+    };
+    const p = {
+      ...prisma,
+      shot: {
+        findUnique: vi.fn().mockResolvedValue({ matchId: 3, inningId: 5 }),
+      },
+      $transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
+    };
+    const svc = new ShotsService(p as unknown as PrismaService);
+    const r = await svc.confirm(7, true);
+    expect(tx.shot.update).toHaveBeenCalledWith({
+      where: { id: 7 },
+      data: { scoreConfirmed: true },
+    });
+    expect(r.scores).toEqual({
+      inning: { scoreFirst: 1, scoreSecond: 1 },
+      match: { scoreFirst: 1, scoreSecond: 1 },
+    });
+    expect(tx.inning.update).toHaveBeenCalledTimes(2);
+    expect(tx.match.update).toHaveBeenCalledWith({
+      where: { id: 3 },
+      data: { scoreFirst: 1, scoreSecond: 1 },
     });
   });
 
@@ -62,5 +125,23 @@ describe('ShotsService', () => {
     prisma.clip.findUnique.mockResolvedValue(null);
     await expect(service.findOne(999)).rejects.toThrow(NotFoundException);
     await expect(service.clipPath(999)).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('parseConfirmBody', () => {
+  it('true, false, null만 받는다', () => {
+    expect(parseConfirmBody({ scoreConfirmed: true })).toBe(true);
+    expect(parseConfirmBody({ scoreConfirmed: false })).toBe(false);
+    expect(parseConfirmBody({ scoreConfirmed: null })).toBeNull();
+  });
+  it('다른 값은 400', () => {
+    for (const body of [
+      undefined,
+      {},
+      { scoreConfirmed: 'yes' },
+      { scoreConfirmed: 1 },
+    ]) {
+      expect(() => parseConfirmBody(body)).toThrow(BadRequestException);
+    }
   });
 });

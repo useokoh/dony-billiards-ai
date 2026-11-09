@@ -1,5 +1,10 @@
 // 분석 JSON → DB 행 변환 (DB 없이 테스트할 수 있도록 순수 함수로 분리)
-import type { Ball, ResultFileJson, ShotJson } from './result-file.types.js';
+import type {
+  Ball,
+  ResultFileJson,
+  ShotJson,
+  TrajectoryFileJson,
+} from './result-file.types.js';
 
 export interface ShotEventRow {
   seq: number;
@@ -82,4 +87,94 @@ export function validateResultFile(
     }
   }
   return d as ResultFileJson;
+}
+
+export interface JudgeFields {
+  result: string;
+  failReason: string | null;
+  scoreBasis: string | null;
+  scoreConfidence: number | null;
+}
+
+const RESULTS = ['success', 'fail'];
+const FAIL_REASONS = ['no_first_hit', 'no_second_hit', 'not_enough_cushions'];
+const BASES = ['agree', 'turn', 'physics'];
+
+/** 분석기의 득점 자동 확정 값 → DB 값. 없거나 모르는 값이면 판정 전(unknown)으로 둔다 */
+export function judgeFields(shot: ShotJson): JudgeFields {
+  if (!shot.result || !RESULTS.includes(shot.result)) {
+    return {
+      result: 'unknown',
+      failReason: null,
+      scoreBasis: null,
+      scoreConfidence: null,
+    };
+  }
+  const c = shot.score_confidence;
+  return {
+    result: shot.result,
+    failReason:
+      shot.result === 'fail' &&
+      shot.fail_reason &&
+      FAIL_REASONS.includes(shot.fail_reason)
+        ? shot.fail_reason
+        : null,
+    scoreBasis:
+      shot.score_basis && BASES.includes(shot.score_basis)
+        ? shot.score_basis
+        : null,
+    scoreConfidence: typeof c === 'number' && c >= 0 && c <= 1 ? c : null,
+  };
+}
+
+/** 다시 가져오기 때 사람이 확인한 기록을 옮기기 위한 열쇠: 시작 프레임 (샷 번호는 바뀔 수 있다) */
+export function confirmationKey(startFrame: number): string {
+  return String(startFrame);
+}
+
+export interface TrajectoryRow {
+  ball: string;
+  startFrame: number;
+  step: number;
+  points: string;
+  estimated: string;
+}
+
+const BALL_NAMES = ['white', 'yellow', 'red'];
+
+/**
+ * 궤적 파일 → 샷 번호별 Trajectory 행. 시작 프레임이 다른 샷(분석을 다시 돌려 어긋난 파일)은 넣지 않는다.
+ * 좌표가 0~1 범위의 [x, y]가 아니거나 estimated 길이가 다르면 그 공은 건너뛴다.
+ */
+export function buildTrajectoryRows(
+  file: TrajectoryFileJson | null,
+  shots: ShotJson[],
+): Map<number, TrajectoryRow[]> {
+  const out = new Map<number, TrajectoryRow[]>();
+  if (!file || !Array.isArray(file.shots)) return out;
+  const startByShot = new Map(shots.map((s) => [s.shot_no, s.start_frame]));
+  for (const t of file.shots) {
+    if (startByShot.get(t.shot_no) !== t.start_frame) continue;
+    const rows: TrajectoryRow[] = [];
+    for (const ball of BALL_NAMES) {
+      const b = t.balls?.[ball];
+      if (!b || !Array.isArray(b.points) || b.points.length === 0) continue;
+      const valid = b.points.every(
+        (p) =>
+          Array.isArray(p) &&
+          p.length === 2 &&
+          p.every((n) => typeof n === 'number' && n >= 0 && n <= 1),
+      );
+      if (!valid || b.estimated?.length !== b.points.length) continue;
+      rows.push({
+        ball,
+        startFrame: t.start_frame,
+        step: t.step,
+        points: JSON.stringify(b.points),
+        estimated: JSON.stringify(b.estimated),
+      });
+    }
+    if (rows.length) out.set(t.shot_no, rows);
+  }
+  return out;
 }

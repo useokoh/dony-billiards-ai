@@ -38,7 +38,12 @@ async function main() {
       const r = await importer.importFile(file, PROJECT_ROOT);
       console.log(
         `${r.replaced ? '다시 저장' : '저장'}: ${r.video} → 경기 ${r.matchId}, ` +
-          `이닝 ${r.innings}, 샷 ${r.shots}, 사건 ${r.events}, 샷 영상 ${r.clips}`,
+          `이닝 ${r.innings}, 샷 ${r.shots}, 사건 ${r.events}, 샷 영상 ${r.clips}, 궤적 ${r.trajectories}\n` +
+          `  득점 자동 확정: 성공 ${r.results.success}, 실패 ${r.results.fail}, 판정 전 ${r.results.unknown} → ` +
+          `점수 ${r.score.scoreFirst}:${r.score.scoreSecond}` +
+          (r.restoredConfirmations || r.lostConfirmations
+            ? `, 사람 확인 유지 ${r.restoredConfirmations}개 (못 옮김 ${r.lostConfirmations}개)`
+            : ''),
       );
     } catch (err) {
       failed += 1;

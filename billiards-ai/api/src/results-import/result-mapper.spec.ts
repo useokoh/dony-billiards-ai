@@ -1,4 +1,6 @@
 import {
+  judgeFields,
+  buildTrajectoryRows,
   buildShotEvents,
   estimateFps,
   playedAtFromFileName,
@@ -86,5 +88,113 @@ describe('validateResultFile', () => {
     expect(() => validateResultFile({ shots: [] }, 'a.json')).toThrow('video');
     const bad = { video: 'v.MP4', shots: [{ ...shot, hit_order: ['red'] }] };
     expect(() => validateResultFile(bad, 'a.json')).toThrow('길이');
+  });
+});
+
+describe('judgeFields', () => {
+  const base = {
+    shot_no: 1,
+    start_frame: 10,
+    end_frame: 20,
+    start_sec: 1,
+    end_sec: 2,
+    cue_ball: 'white' as const,
+    cushion_count: 3,
+    cushion_frames: [],
+    hit_order: [],
+    hit_frames: [],
+    score_candidate: false,
+    inning_no: 1,
+    player: 'first' as const,
+    shot_no_in_turn: 1,
+    shot_no_in_inning: 1,
+  };
+  it('자동 확정 값을 옮긴다', () => {
+    expect(
+      judgeFields({
+        ...base,
+        result: 'fail',
+        fail_reason: 'no_second_hit',
+        score_basis: 'agree',
+        score_confidence: 0.95,
+      }),
+    ).toEqual({
+      result: 'fail',
+      failReason: 'no_second_hit',
+      scoreBasis: 'agree',
+      scoreConfidence: 0.95,
+    });
+  });
+  it('성공이면 실패 원인을 버리고, 이상한 값은 null', () => {
+    expect(
+      judgeFields({
+        ...base,
+        result: 'success',
+        fail_reason: 'no_first_hit',
+        score_basis: 'x' as never,
+        score_confidence: 5,
+      }),
+    ).toEqual({
+      result: 'success',
+      failReason: null,
+      scoreBasis: null,
+      scoreConfidence: null,
+    });
+  });
+  it('판정 값이 없는 이전 파일은 unknown', () => {
+    expect(judgeFields(base).result).toBe('unknown');
+  });
+});
+
+describe('buildTrajectoryRows', () => {
+  const s = (shot_no: number, start_frame: number) =>
+    ({ shot_no, start_frame }) as unknown as ShotJson;
+  const ball = (points: unknown, estimated: unknown) => ({ points, estimated });
+  it('샷 번호와 시작 프레임이 맞는 궤적만 넣는다', () => {
+    const rows = buildTrajectoryRows(
+      {
+        video: 'v',
+        step: 2,
+        shots: [
+          {
+            shot_no: 1,
+            start_frame: 100,
+            step: 2,
+            last_frame: 104,
+            balls: {
+              white: ball(
+                [
+                  [0.1, 0.2],
+                  [0.2, 0.3],
+                ],
+                [0, 1],
+              ),
+              red: ball([[2, 0]], [0]),
+            } as never,
+          },
+          {
+            shot_no: 2,
+            start_frame: 999,
+            step: 2,
+            last_frame: 1000,
+            balls: { white: ball([[0, 0]], [0]) } as never,
+          },
+        ],
+      },
+      [s(1, 100), s(2, 200)],
+    );
+    expect([...rows.keys()]).toEqual([1]);
+    expect(rows.get(1)).toEqual([
+      {
+        ball: 'white',
+        startFrame: 100,
+        step: 2,
+        points: '[[0.1,0.2],[0.2,0.3]]',
+        estimated: '[0,1]',
+      },
+    ]); // red는 범위 밖 좌표라 제외
+  });
+  it('파일이 없으면 빈 Map', () => {
+    expect(buildTrajectoryRows(null, [s(1, 1)]).size).toBe(0);
   });
 });

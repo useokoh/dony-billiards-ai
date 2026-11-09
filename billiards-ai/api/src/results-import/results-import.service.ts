@@ -1,12 +1,16 @@
 // 분석 결과 JSON을 SQLite에 저장한다. (DB 저장은 백엔드만 맡는다: Docs/기술스택.md 1장)
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { recountMatchScores } from '../scoring/score.js';
 import {
   buildShotEvents,
+  buildTrajectoryRows,
+  confirmationKey,
   estimateFps,
+  judgeFields,
   playedAtFromFileName,
   validateResultFile,
 } from './result-mapper.js';
@@ -22,7 +26,12 @@ export interface ImportSummary {
   shots: number;
   events: number;
   clips: number;
+  trajectories: number; // 궤적이 들어간 샷 수
   replaced: boolean; // 같은 영상의 이전 기록을 지우고 다시 넣었는지
+  results: { success: number; fail: number; unknown: number }; // 자동 확정 결과
+  restoredConfirmations: number; // 이전 기록에서 옮긴 사람 확인 수
+  lostConfirmations: number; // 같은 샷을 찾지 못해 옮기지 못한 사람 확인 수
+  score: { scoreFirst: number; scoreSecond: number };
 }
 
 /** ffprobe로 영상의 fps와 길이를 읽는다. 실패하면 null. */
@@ -81,11 +90,48 @@ export class ResultsImportService {
     const fps = probe?.fps ?? estimateFps(data.shots);
     if (!fps) throw new Error(`${resultFile}: fps를 알 수 없습니다.`);
 
+    // 샷별 궤적 (analyzer.trajectory 결과). 없으면 궤적 없이 가져온다
+    const trajectoryFile = join(
+      projectRoot,
+      'data/results/trajectories',
+      `${stem}.json`,
+    );
+    const trajectories = buildTrajectoryRows(
+      existsSync(trajectoryFile)
+        ? JSON.parse(readFileSync(trajectoryFile, 'utf8'))
+        : null,
+      data.shots,
+    );
+
     const tableId = await this.ensureDefaultTable();
 
     // 여러 테이블에 나눠 쓰므로 하나라도 실패하면 전부 되돌린다.
     return this.prisma.$transaction(
       async (tx) => {
+        // 지우기 전에 사람이 확인한 득점 기록을 시작 프레임 기준으로 보관한다
+        const previous = await tx.shot.findMany({
+          where: { match: { videoPath }, scoreConfirmed: { not: null } },
+          select: { startFrame: true, scoreConfirmed: true },
+        });
+        const kept = new Map(
+          previous.map((p) => [
+            confirmationKey(p.startFrame),
+            p.scoreConfirmed,
+          ]),
+        );
+
+        // 경기에 연결한 플레이어도 옮긴다
+        const previousMatch = await tx.match.findFirst({
+          where: { videoPath },
+          orderBy: { id: 'desc' },
+          select: {
+            firstPlayer: true,
+            secondPlayer: true,
+            firstPlayerId: true,
+            secondPlayerId: true,
+          },
+        });
+
         // 같은 영상을 다시 가져오면 이전 경기를 지우고 새로 넣는다. (하위 행은 Cascade로 같이 삭제)
         const removed = await tx.match.deleteMany({ where: { videoPath } });
 
@@ -94,6 +140,7 @@ export class ResultsImportService {
             tableId,
             playedAt: playedAtFromFileName(data.video) ?? new Date(),
             firstCueBall: data.shots[0]?.cue_ball ?? null,
+            ...previousMatch,
             videoPath,
             fps,
             durationSec: probe?.durationSec ?? null,
@@ -117,7 +164,15 @@ export class ResultsImportService {
 
         let events = 0;
         let clips = 0;
+        let restored = 0;
+        const results = { success: 0, fail: 0, unknown: 0 };
         for (const s of data.shots) {
+          const judge = judgeFields(s);
+          results[judge.result as keyof typeof results] += 1;
+          const key = confirmationKey(s.start_frame);
+          const scoreConfirmed = kept.get(key) ?? null;
+          if (kept.has(key)) restored += 1;
+
           const shotEvents = buildShotEvents(s, fps);
           events += shotEvents.length;
           if (s.clip) clips += 1;
@@ -139,9 +194,14 @@ export class ResultsImportService {
               cushionCount: s.cushion_count,
               cushionsBeforeSecondHit: s.cushions_before_second_hit ?? null,
               hitOrder: JSON.stringify(s.hit_order),
-              // result, failReason은 5단계(실패 원인)에서 채운다. 지금은 기본값 unknown.
               scoreCandidate: s.score_candidate,
+              // ⑨ 득점 자동 확정 (analyzer/judge.py)과 이전에 사람이 확인한 값
+              ...judge,
+              scoreConfirmed,
               events: { create: shotEvents },
+              trajectories: trajectories.has(s.shot_no)
+                ? { create: trajectories.get(s.shot_no) }
+                : undefined,
               clip: s.clip
                 ? {
                     create: {
@@ -159,6 +219,9 @@ export class ResultsImportService {
           });
         }
 
+        // 점수: 사람 확인 > 자동 확정 기준으로 이닝별·경기 전체를 센다
+        const { match: score } = await recountMatchScores(tx, match.id);
+
         return {
           matchId: match.id,
           video: data.video,
@@ -166,7 +229,12 @@ export class ResultsImportService {
           shots: data.shots.length,
           events,
           clips,
+          trajectories: trajectories.size,
           replaced: removed.count > 0,
+          results,
+          restoredConfirmations: restored,
+          lostConfirmations: kept.size - restored,
+          score,
         };
       },
       { timeout: 60000 },

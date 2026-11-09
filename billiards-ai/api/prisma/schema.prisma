@@ -10,6 +10,21 @@ datasource db {
   provider = "sqlite"
 }
 
+// 플레이어 프로필: 목표 핸디별 코칭 기준 (초급 20 / 중급 27 / 고급 27+)
+model Player {
+  id              Int      @id @default(autoincrement())
+  name            String
+  currentHandicap Int?     @map("current_handicap") // 현재 핸디 (선택 입력)
+  targetHandicap  Int?     @map("target_handicap") // 목표 핸디
+  coachingLevel   String?  @map("coaching_level") // beginner, intermediate, advanced (목표 핸디에서 계산, 직접 조정 가능)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  firstMatches    Match[]  @relation("FirstPlayer")
+  secondMatches   Match[]  @relation("SecondPlayer")
+
+  @@map("players")
+}
+
 // 매장
 model Store {
   id        Int             @id @default(autoincrement())
@@ -35,32 +50,38 @@ model BilliardTable {
 
 // 경기 = 영상 1개
 model Match {
-  id           Int           @id @default(autoincrement())
-  tableId      Int           @map("table_id")
-  playedAt     DateTime      @map("played_at")
-  firstPlayer  String?       @map("first_player") // player1 → 선공 이름
-  secondPlayer String?       @map("second_player") // player2 → 후공 이름
-  firstCueBall String?       @map("first_cue_ball") // 선공 수구 white/yellow (분석 후 채움)
-  videoPath    String        @map("video_path")
-  fps          Float? // 프레임 번호 ↔ 초 변환용
-  durationSec  Float?        @map("duration_sec") // 
-  corners      String? // 이 영상의 모서리 4점 (JSON)
-  trackPath    String?       @map("track_path") // 전체 궤적 원본 track.npz 경로
-  status       String        @default("uploaded") // uploaded, analyzing, done, failed
-  progress     Int           @default(0) // 0~100
-  errorMessage String?       @map("error_message") // 실패 이유
-  scoreFirst   Int           @default(0) @map("score_first") // 선공 득점 (확정 기준 집계값)
-  scoreSecond  Int           @default(0) @map("score_second") // 후공 득점
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-  table        BilliardTable @relation(fields: [tableId], references: [id])
-  runs         AnalysisRun[]
-  innings      Inning[]
-  shots        Shot[]
-  clips        Clip[]
-  feedback     Feedback[]
+  id             Int           @id @default(autoincrement())
+  tableId        Int           @map("table_id")
+  playedAt       DateTime      @map("played_at")
+  firstPlayer    String?       @map("first_player") // player1 → 선공 이름
+  secondPlayer   String?       @map("second_player") // player2 → 후공 이름
+  firstPlayerId  Int?          @map("first_player_id") // 선공 플레이어 프로필 (목표 핸디별 코칭 기준)
+  secondPlayerId Int?          @map("second_player_id") // 후공 플레이어 프로필
+  firstProfile   Player?       @relation("FirstPlayer", fields: [firstPlayerId], references: [id], onDelete: SetNull)
+  secondProfile  Player?       @relation("SecondPlayer", fields: [secondPlayerId], references: [id], onDelete: SetNull)
+  firstCueBall   String?       @map("first_cue_ball") // 선공 수구 white/yellow (분석 후 채움)
+  videoPath      String        @map("video_path")
+  fps            Float? // 프레임 번호 ↔ 초 변환용
+  durationSec    Float?        @map("duration_sec") // 
+  corners        String? // 이 영상의 모서리 4점 (JSON)
+  trackPath      String?       @map("track_path") // 전체 궤적 원본 track.npz 경로
+  status         String        @default("uploaded") // uploaded, analyzing, done, failed
+  progress       Int           @default(0) // 0~100
+  errorMessage   String?       @map("error_message") // 실패 이유
+  scoreFirst     Int           @default(0) @map("score_first") // 선공 득점 (확정 기준 집계값)
+  scoreSecond    Int           @default(0) @map("score_second") // 후공 득점
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  table          BilliardTable @relation(fields: [tableId], references: [id])
+  runs           AnalysisRun[]
+  innings        Inning[]
+  shots          Shot[]
+  clips          Clip[]
+  feedback       Feedback[]
 
   @@index([tableId, playedAt])
+  @@index([firstPlayerId])
+  @@index([secondPlayerId])
   @@map("matches")
 }
 
@@ -115,10 +136,12 @@ model Shot {
   cushionCount            Int                @default(0) @map("cushion_count")
   cushionsBeforeSecondHit Int?               @map("cushions_before_second_hit") // 3쿠션 판정 핵심값
   hitOrder                String?            @map("hit_order") // JSON 예: ["red","yellow"] (요약용, 상세는 ShotEvent)
-  result                  String             @default("unknown") // success, fail, unknown
+  result                  String             @default("unknown") // 자동 확정 결과 success, fail (unknown = 판정 전). 사람 확인(scoreConfirmed)이 우선
   failReason              String?            @map("fail_reason") // no_first_hit, no_second_hit, not_enough_cushions
   scoreCandidate          Boolean            @default(false) @map("score_candidate")
   scoreConfirmed          Boolean?           @map("score_confirmed") // 사람이 확인한 결과 (null = 미확인)
+  scoreBasis              String?            @map("score_basis") // 자동 확정 근거: agree(물리+차례 일치), turn(차례 신호 우선), physics(물리만)
+  scoreConfidence         Float?             @map("score_confidence") // 자동 확정 신뢰도 0~1
   match                   Match              @relation(fields: [matchId], references: [id], onDelete: Cascade)
   inning                  Inning             @relation(fields: [inningId], references: [id], onDelete: Cascade)
   events                  ShotEvent[]
@@ -165,16 +188,19 @@ model Trajectory {
   @@map("trajectories")
 }
 
-// 추천 경로
+// 추천 경로 (규칙 기반 권장값. 실제 사용한 회전·힘을 판정한 값이 아님)
 model RecommendedRoute {
-  id           Int      @id @default(autoincrement())
-  shotId       Int      @map("shot_id")
-  rank         Int      @default(1) // 추천 순위
-  points       String // 좌표 목록 (JSON)
-  cushionCount Int      @map("cushion_count")
-  description  String
-  createdAt    DateTime @default(now()) @map("created_at")
-  shot         Shot     @relation(fields: [shotId], references: [id], onDelete: Cascade)
+  id            Int      @id @default(autoincrement())
+  shotId        Int      @map("shot_id")
+  rank          Int      @default(1) // 추천 순위
+  points        String // 좌표 목록 (JSON)
+  cushionCount  Int      @map("cushion_count")
+  description   String
+  difficulty    String? // beginner, intermediate, advanced — 권장 난이도
+  executionHint String?  @map("execution_hint") // 권장 두께·쿠션·회전·강약 (JSON, ExecutionHint 계약)
+  confidence    Float? // 규칙·물리 계산의 신뢰도 0~1 (회전 판정 정확도가 아님)
+  createdAt     DateTime @default(now()) @map("created_at")
+  shot          Shot     @relation(fields: [shotId], references: [id], onDelete: Cascade)
 
   @@index([shotId, rank])
   @@map("recommended_routes")
@@ -197,15 +223,16 @@ model Clip {
 
 // 피드백
 model Feedback {
-  id        Int      @id @default(autoincrement())
-  matchId   Int      @map("match_id")
-  shotId    Int?     @map("shot_id")
-  kind      String // cushion, first_hit, summary 등
-  source    String   @default("auto") // auto(분석기), user(사람)
-  message   String
-  createdAt DateTime @default(now()) @map("created_at")
-  match     Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  shot      Shot?    @relation(fields: [shotId], references: [id], onDelete: Cascade)
+  id             Int      @id @default(autoincrement())
+  matchId        Int      @map("match_id")
+  shotId         Int?     @map("shot_id")
+  kind           String // cushion, first_hit, summary 등
+  source         String   @default("auto") // auto(분석기), user(사람)
+  targetHandicap Int?     @map("target_handicap") // 이 피드백을 만든 목표 핸디 (없으면 모든 레벨 공통)
+  message        String
+  createdAt      DateTime @default(now()) @map("created_at")
+  match          Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  shot           Shot?    @relation(fields: [shotId], references: [id], onDelete: Cascade)
 
   @@index([matchId])
   @@index([shotId])
