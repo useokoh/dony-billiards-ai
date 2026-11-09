@@ -101,6 +101,14 @@ cd web && npm run dev
 
 결과는 `data/results/trajectories/영상이름.json`(영상 1개당 약 1MB)입니다.
 
+## 추천 경로 모델 보정
+
+분석이 끝난 영상들에서 이 당구대의 쿠션 반사·충돌 꺾임·1적구 이동 거리를 재서 `data/results/route_model.json`에 저장합니다. 백엔드 추천 경로 계산이 이 파일을 읽습니다(없으면 코드에 넣어 둔 2026-11-09 측정값). 교차 검증 결과도 함께 출력합니다.
+
+```bash
+.venv/bin/python -m analyzer.route_model
+```
+
 ## 분석 결과를 DB에 저장
 
 `data/results/shots/*.json`(있으면 궤적 JSON도)을 SQLite(`data/billiards.db`)에 넣는다. 같은 영상을 다시 넣으면 이전 기록을 지우고 새로 저장하되, 사람이 확인한 득점 값과 경기에 연결한 선수는 옮긴다.
