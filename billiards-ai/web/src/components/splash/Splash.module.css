@@ -1,0 +1,107 @@
+/* 스플래시 화면 스타일 (색은 블루 시안 기준안) */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  overflow: hidden;
+  cursor: pointer;
+  /* 자바스크립트가 멈춰도 6초 뒤에는 화면을 가리지 않는다 */
+  animation: splash-failsafe 0s linear 6s forwards;
+}
+
+/* 이번 창에서 이미 봤으면 첫 화면부터 숨긴다 (layout.tsx의 스크립트가 표시) */
+:global(html[data-splash="done"]) .overlay {
+  display: none;
+}
+
+@keyframes splash-failsafe {
+  to {
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  background: #101315;
+}
+
+.stage {
+  position: relative;
+  width: min(100%, 420px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+}
+
+.table {
+  width: 100%;
+  will-change: transform, opacity;
+}
+
+.table svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.logo {
+  display: flex;
+  color: #f3f4f1;
+  font-size: clamp(56px, 18vw, 88px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  will-change: transform, opacity;
+}
+
+.letter {
+  display: inline-block;
+  opacity: 0;
+  will-change: transform, opacity, filter;
+}
+
+.subtitle {
+  margin-top: -12px;
+  color: #a4aeb3;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  opacity: 0;
+}
+
+.skip {
+  position: absolute;
+  right: 16px;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid #2c3337;
+  border-radius: 22px;
+  background: transparent;
+  color: #a4aeb3;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.skip:focus-visible {
+  outline: 2px solid #6cbdeb;
+  outline-offset: 2px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

@@ -1,0 +1,213 @@
+// DB 테이블 정의 (Docs/기술스택.md 5장 기준, 분석기 출력 data/results/shots/*.json에 맞춤)
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// 매장
+model Store {
+  id        Int             @id @default(autoincrement())
+  name      String
+  createdAt DateTime        @default(now()) @map("created_at")
+  tables    BilliardTable[]
+
+  @@map("stores")
+}
+
+// 당구대
+model BilliardTable {
+  id      Int     @id @default(autoincrement())
+  storeId Int     @map("store_id")
+  name    String
+  corners String? // 기본 모서리 4점 (JSON). 영상마다 다르면 Match.corners가 우선
+  store   Store   @relation(fields: [storeId], references: [id])
+  matches Match[]
+
+  @@index([storeId])
+  @@map("billiard_tables")
+}
+
+// 경기 = 영상 1개
+model Match {
+  id           Int           @id @default(autoincrement())
+  tableId      Int           @map("table_id")
+  playedAt     DateTime      @map("played_at")
+  firstPlayer  String?       @map("first_player") // player1 → 선공 이름
+  secondPlayer String?       @map("second_player") // player2 → 후공 이름
+  firstCueBall String?       @map("first_cue_ball") // 선공 수구 white/yellow (분석 후 채움)
+  videoPath    String        @map("video_path")
+  fps          Float? // 프레임 번호 ↔ 초 변환용
+  durationSec  Float?        @map("duration_sec") // 
+  corners      String? // 이 영상의 모서리 4점 (JSON)
+  trackPath    String?       @map("track_path") // 전체 궤적 원본 track.npz 경로
+  status       String        @default("uploaded") // uploaded, analyzing, done, failed
+  progress     Int           @default(0) // 0~100
+  errorMessage String?       @map("error_message") // 실패 이유
+  scoreFirst   Int           @default(0) @map("score_first") // 선공 득점 (확정 기준 집계값)
+  scoreSecond  Int           @default(0) @map("score_second") // 후공 득점
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  table        BilliardTable @relation(fields: [tableId], references: [id])
+  runs         AnalysisRun[]
+  innings      Inning[]
+  shots        Shot[]
+  clips        Clip[]
+  feedback     Feedback[]
+
+  @@index([tableId, playedAt])
+  @@map("matches")
+}
+
+// 분석 실행 기록: 단계별 진행·실패·재실행 이력
+model AnalysisRun {
+  id           Int       @id @default(autoincrement())
+  matchId      Int       @map("match_id")
+  step         String // detect, track, shots, clips, all
+  status       String    @default("queued") // queued, running, done, failed
+  progress     Int       @default(0)
+  options      String? // 실행 옵션 (JSON) 예: {"samples":150,"reuse":true}
+  logPath      String?   @map("log_path")
+  errorMessage String?   @map("error_message")
+  startedAt    DateTime? @map("started_at")
+  finishedAt   DateTime? @map("finished_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  match        Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@index([matchId, createdAt])
+  @@map("analysis_runs")
+}
+
+// 이닝: 선공과 후공이 한 번씩 차례를 마치면 1이닝
+model Inning {
+  id          Int    @id @default(autoincrement())
+  matchId     Int    @map("match_id")
+  inningNo    Int    @map("inning_no")
+  scoreFirst  Int    @default(0) @map("score_first") // 이 이닝 선공 득점
+  scoreSecond Int    @default(0) @map("score_second") // 이 이닝 후공 득점
+  match       Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  shots       Shot[]
+
+  @@unique([matchId, inningNo])
+  @@map("innings")
+}
+
+// 샷
+model Shot {
+  id                      Int                @id @default(autoincrement())
+  matchId                 Int                @map("match_id")
+  inningId                Int                @map("inning_id")
+  shotNo                  Int                @map("shot_no")
+  shotNoInInning          Int                @map("shot_no_in_inning")
+  shotNoInTurn            Int                @map("shot_no_in_turn") // 차례 안에서 몇 번째 (하이런 계산)
+  player                  String // first, second
+  cueBall                 String             @map("cue_ball") // white, yellow
+  startFrame              Int                @map("start_frame") // 
+  endFrame                Int                @map("end_frame") // 
+  startSec                Float              @map("start_sec")
+  endSec                  Float              @map("end_sec")
+  restSec                 Float?             @map("rest_sec") // 공이 모두 멈춘 시각
+  cushionCount            Int                @default(0) @map("cushion_count")
+  cushionsBeforeSecondHit Int?               @map("cushions_before_second_hit") // 3쿠션 판정 핵심값
+  hitOrder                String?            @map("hit_order") // JSON 예: ["red","yellow"] (요약용, 상세는 ShotEvent)
+  result                  String             @default("unknown") // success, fail, unknown
+  failReason              String?            @map("fail_reason") // no_first_hit, no_second_hit, not_enough_cushions
+  scoreCandidate          Boolean            @default(false) @map("score_candidate")
+  scoreConfirmed          Boolean?           @map("score_confirmed") // 사람이 확인한 결과 (null = 미확인)
+  match                   Match              @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  inning                  Inning             @relation(fields: [inningId], references: [id], onDelete: Cascade)
+  events                  ShotEvent[]
+  trajectories            Trajectory[]
+  routes                  RecommendedRoute[]
+  clip                    Clip?
+  feedback                Feedback[]
+
+  @@unique([matchId, shotNo])
+  @@index([inningId])
+  @@index([matchId, player])
+  @@map("shots")
+}
+
+// 샷 안의 사건: 쿠션 접촉, 공 맞힘 (cushion_frames, hit_frames를 행으로 저장)
+model ShotEvent {
+  id      Int     @id @default(autoincrement())
+  shotId  Int     @map("shot_id")
+  seq     Int // 샷 안에서의 순서 1, 2, 3...
+  kind    String // cushion, hit
+  frameNo Int     @map("frame_no")
+  tSec    Float   @map("t_sec")
+  target  String? // hit일 때 맞은 공 red/yellow/white
+  shot    Shot    @relation(fields: [shotId], references: [id], onDelete: Cascade)
+
+  @@unique([shotId, seq])
+  @@index([shotId, kind])
+  @@map("shot_events")
+}
+
+// 궤적: 프레임×공마다 1행 → 샷×공마다 1행 (좌표 배열을 JSON으로)
+// 48분 영상 기준 기존 방식은 약 26만 행, 이 방식은 약 300행
+model Trajectory {
+  id         Int     @id @default(autoincrement())
+  shotId     Int     @map("shot_id")
+  ball       String // white, yellow, red
+  startFrame Int     @map("start_frame")
+  step       Int     @default(1) // 몇 프레임마다 저장했는지 (1 = 전부)
+  points     String // JSON [[x, y], ...] 당구대 기준 0~1 좌표
+  estimated  String? // JSON [0,1,...] 보간된 점 표시 (points와 같은 길이)
+  shot       Shot    @relation(fields: [shotId], references: [id], onDelete: Cascade)
+
+  @@unique([shotId, ball])
+  @@map("trajectories")
+}
+
+// 추천 경로
+model RecommendedRoute {
+  id           Int      @id @default(autoincrement())
+  shotId       Int      @map("shot_id")
+  rank         Int      @default(1) // 추천 순위
+  points       String // 좌표 목록 (JSON)
+  cushionCount Int      @map("cushion_count")
+  description  String
+  createdAt    DateTime @default(now()) @map("created_at")
+  shot         Shot     @relation(fields: [shotId], references: [id], onDelete: Cascade)
+
+  @@index([shotId, rank])
+  @@map("recommended_routes")
+}
+
+// 샷별 영상
+model Clip {
+  id       Int    @id @default(autoincrement())
+  matchId  Int    @map("match_id")
+  shotId   Int?   @unique @map("shot_id") // 샷당 영상 1개
+  filePath String @map("file_path")
+  startSec Float  @map("start_sec")
+  endSec   Float  @map("end_sec")
+  match    Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  shot     Shot?  @relation(fields: [shotId], references: [id], onDelete: Cascade)
+
+  @@index([matchId])
+  @@map("clips")
+}
+
+// 피드백
+model Feedback {
+  id        Int      @id @default(autoincrement())
+  matchId   Int      @map("match_id")
+  shotId    Int?     @map("shot_id")
+  kind      String // cushion, first_hit, summary 등
+  source    String   @default("auto") // auto(분석기), user(사람)
+  message   String
+  createdAt DateTime @default(now()) @map("created_at")
+  match     Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  shot      Shot?    @relation(fields: [shotId], references: [id], onDelete: Cascade)
+
+  @@index([matchId])
+  @@index([shotId])
+  @@map("feedback")
+}

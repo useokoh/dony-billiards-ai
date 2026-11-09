@@ -1,0 +1,9 @@
+# 저장소에 올리지 않는 것
+# 사업소개서 결과물·다른 회사 IR 자료·판정 확인 영상
+/Project/
+# 사업소개서 생성 스크립트
+/slides/
+# 원본 경기 영상 (GitHub 100MB 제한 초과)
+/Docs/Sauce/
+# macOS
+.DS_Store

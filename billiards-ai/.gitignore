@@ -1,0 +1,14 @@
+# 영상·DB·분석 결과
+data/
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+# Node
+node_modules/
+.next/
+dist/
+# 환경 변수
+.env
+# 빌드 캐시
+*.tsbuildinfo
