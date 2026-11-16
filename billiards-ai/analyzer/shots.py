@@ -217,18 +217,23 @@ def find_rest(pixels: np.ndarray, end: int, limit: int) -> int:
 def analyze_track(times: np.ndarray, positions: np.ndarray, moves: np.ndarray, estimated: np.ndarray | None = None) -> tuple[list[dict], list[dict]]:
     """움직임 구간 전체를 판정해 (샷 목록, 샷이 아닌 구간 목록)을 돌려준다."""
     pixels = to_px(positions)
+    # 영상 끝 몇 프레임은 읽히지 않아 시간이 NaN일 수 있으므로, 시간은 마지막으로 읽은 프레임까지만 쓴다.
+    last_read = int(np.flatnonzero(~np.isnan(times))[-1])
+
+    def sec(frame: int) -> float:
+        return round(float(times[min(frame, last_read)]), 2)
+
     shots, others = [], []
     for index, (begin, end) in enumerate(moves):
         begin, end = int(begin), int(end)
-        next_start = int(moves[index + 1][0]) if index + 1 < len(moves) else len(pixels) - 1
+        next_start = int(moves[index + 1][0]) if index + 1 < len(moves) else last_read
         rest = find_rest(pixels, end, min(next_start, end + REST_MAX_FRAMES))
         # 끝에 아주 느리게 밀린 공도 잡도록 구간보다 조금 더 본다.
         paths = {name: pixels[begin : end + 1 + AFTER_MOVE, b] for b, name in enumerate(BALLS)}
         flags = {name: estimated[begin : end + 1, b] for b, name in enumerate(BALLS)} if estimated is not None else None
         result = analyze_move(paths, flags)
         span = {
-            "start_frame": begin, "end_frame": end, "start_sec": round(float(times[begin]), 2), "end_sec": round(float(times[end]), 2),
-            "rest_sec": round(float(times[rest]), 2),
+            "start_frame": begin, "end_frame": end, "start_sec": sec(begin), "end_sec": sec(end), "rest_sec": sec(rest),
         }
         if result is None:
             others.append(span)

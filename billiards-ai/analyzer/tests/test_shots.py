@@ -3,7 +3,7 @@ import numpy as np
 
 from analyzer.calibrate import TABLE_H, TABLE_W
 from analyzer.detect import BALL_RADIUS
-from analyzer.shots import find_rest, analyze_move, count_cushions, find_contact, find_cue_ball, turn_agreement
+from analyzer.shots import analyze_track, find_rest, analyze_move, count_cushions, find_contact, find_cue_ball, turn_agreement
 
 R = BALL_RADIUS
 
@@ -144,3 +144,14 @@ def test_find_rest_stops_before_next_shot():
     rolling = segments((100, 300), (1300, 300), step=1.0)
     pixels = np.stack([rolling, rolling, rolling], axis=1)
     assert find_rest(pixels, end=0, limit=200) <= 200
+
+
+def test_unread_frames_at_video_end_give_valid_times():
+    white = np.vstack([still((300, 300), 5), segments((300, 300), (1300, 400), step=8), still((1300, 400), 10)])
+    frames = len(white)
+    pixels = np.stack([white, still((100, 600), frames), still((1400, 100), frames)], axis=1)
+    times = np.arange(frames) / 30.0
+    times[-8:] = np.nan  # 영상 끝 프레임을 읽지 못함
+    shots, _ = analyze_track(times, pixels / np.array([TABLE_W, TABLE_H]), np.array([[5, frames - 1]]))
+    assert len(shots) == 1
+    assert all(np.isfinite(shots[0][key]) for key in ("start_sec", "end_sec", "rest_sec"))

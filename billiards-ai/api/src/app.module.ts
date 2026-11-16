@@ -9,8 +9,11 @@ import { MatchesService } from './matches/matches.service.js';
 import { PlayersController } from './players/players.controller.js';
 import { PlayersService } from './players/players.service.js';
 import { PrismaService } from './prisma/prisma.service.js';
+import { ResultsImportService } from './results-import/results-import.service.js';
 import { ShotsController } from './shots/shots.controller.js';
 import { ShotsService } from './shots/shots.service.js';
+import { UploadsController } from './uploads/uploads.controller.js';
+import { UploadsService } from './uploads/uploads.service.js';
 
 @Module({
   imports: [],
@@ -21,6 +24,7 @@ import { ShotsService } from './shots/shots.service.js';
     ShotsController,
     CoachingController,
     PlayersController,
+    UploadsController,
   ],
   providers: [
     AppService,
@@ -29,6 +33,8 @@ import { ShotsService } from './shots/shots.service.js';
     ShotsService,
     CoachingService,
     PlayersService,
+    ResultsImportService,
+    UploadsService,
   ],
 })
 export class AppModule {}
