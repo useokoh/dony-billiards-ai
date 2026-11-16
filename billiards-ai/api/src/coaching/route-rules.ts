@@ -11,6 +11,7 @@ import {
   type ExecutionHint,
   type FailureKind,
   type FeedbackItem,
+  type PlayedRouteDto,
   type RailKind,
   type RecommendedRouteDto,
   type SpinAmount,
@@ -19,10 +20,14 @@ import {
   type Thickness,
   type TipHeight,
 } from './coaching.types.js';
+import type { PlayedRoute } from './played-route.js';
 import {
   candidatePlans,
   matchesOrder,
+  planCorrection,
+  RAIL_KIND,
   routeKey,
+  thicknessBucket,
   type PlannedRoute,
 } from './route-geometry.js';
 import {
@@ -483,6 +488,100 @@ function computedRoute(
     executionHint: makeHint(spec, plan),
     ...geometryFields(plan, model),
   };
+}
+
+const CHANGE_KEEP_DEG = 1; // 이보다 작게 바꾸면 "두께는 거의 맞음"으로 본다 (모델 오차 수준)
+
+/**
+ * 내가 친 경로 교정 (A안). 실제로 친 첫 목적구·쿠션 순서·맞힌 쪽은 그대로 두고 두께와 세기를 고친다.
+ * played가 null이면(잴 수 없는 샷) 교정 없이 사유만 돌려준다.
+ */
+export function buildCorrection(
+  played: PlayedRoute | null,
+  geometry: ShotGeometry,
+  level: CoachingLevel,
+  model: RouteModel = loadRouteModel(),
+): PlayedRouteDto {
+  if (!played) {
+    return {
+      played: null,
+      correction: null,
+      reason: 'not_measured',
+      message:
+        '친 경로를 영상에서 잴 수 없는 샷이라(첫 목적구를 못 맞혔거나 쿠션을 먼저 맞힌 샷 등) 다른 경로를 추천합니다.',
+    };
+  }
+  const order = played.rails.map((r) => RAIL_KIND[r]);
+  const playedCut = Math.abs(played.cutDeg);
+  const summary = {
+    firstObjectBall: played.firstObjectBall,
+    secondObjectBall: played.secondObjectBall,
+    cutDeg: Math.round(playedCut * 10) / 10,
+    thickness: thicknessBucket(played.thicknessFraction),
+    cushionOrder: order,
+    missGapM: played.missGapM,
+    stoppedShort: played.stoppedShort,
+  };
+  const routeText = `${BALL_LABEL[played.firstObjectBall]} 먼저${order.length ? ` → ${order.map((k) => RAIL_ORDER_LABEL[k]).join('·')}` : ''}`;
+  const miss =
+    played.missGapM !== null
+      ? ` ${BALL_LABEL[played.secondObjectBall]}을 약 ${Math.round(played.missGapM * 100)}cm 차이로 놓쳤습니다.`
+      : '';
+  const plan = planCorrection(
+    geometry.layout,
+    geometry.cueBall,
+    played.firstObjectBall,
+    played.rails,
+    played.cutDeg,
+    model,
+    level,
+  );
+  if (!plan) {
+    return {
+      played: summary,
+      correction: null,
+      reason: 'no_scoring_window',
+      message: `친 경로(${routeText})로는 이 배치에서 득점 구간이 계산되지 않아 다른 경로를 추천합니다.${miss}`,
+    };
+  }
+  const delta = Math.round(Math.abs(plan.cutDeg - playedCut) * 10) / 10;
+  const change =
+    delta < CHANGE_KEEP_DEG
+      ? 'keep'
+      : plan.cutDeg < playedCut
+        ? 'thicker'
+        : 'thinner';
+  const stronger = played.stoppedShort;
+  const thicknessText =
+    change === 'keep'
+      ? `두께는 거의 맞았습니다(${THICKNESS_LABEL[summary.thickness]}).`
+      : `${summary.thickness === plan.thickness ? `같은 ${THICKNESS_LABEL[plan.thickness]} 안에서` : `두께를 ${THICKNESS_LABEL[summary.thickness]}에서 ${THICKNESS_LABEL[plan.thickness]}로`}, 자르는 각 약 ${summary.cutDeg}° → ${plan.cutDeg}°(약 ${delta}° 더 ${change === 'thicker' ? '두껍게' : '얇게'}) 맞히세요.`;
+  const strengthText = stronger
+    ? ' 2적구 근처에서 공이 거의 멈췄으니 힘이 모자랐을 가능성이 큽니다. 한 단계 더 세게 치세요.'
+    : ` 세기는 ${STRENGTH_LABEL[plan.strength]}가 권장값입니다.`;
+  const message = `친 경로(${routeText}) 그대로 득점할 수 있습니다.${miss} ${thicknessText}${strengthText}`;
+  const route = computedRoute(plan, 0, message, model, false);
+  if (stronger && route.executionHint) {
+    route.executionHint.strength = { level: 'firm', label: '한 단계 더 세게' };
+  }
+  return {
+    played: summary,
+    correction: { route, cutChangeDeg: delta, change, stronger },
+    reason: null,
+    message,
+  };
+}
+
+/** 교정이 있으면 다른 경로는 교정보다 확실히 쉬운 것(공통 쉬움 지수가 잡음 수준 이상 높은 것)만 남긴다 */
+export function easierThan(
+  routes: RecommendedRouteDto[],
+  correction: PlayedRouteDto['correction'],
+): RecommendedRouteDto[] {
+  const base = correction?.route.comparison?.referenceSuccess;
+  if (base === undefined) return routes;
+  return routes
+    .filter((r) => (r.comparison?.referenceSuccess ?? -1) > base + TIE)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
 const FAILURE_FOCUS: Record<FailureKind, string> = {

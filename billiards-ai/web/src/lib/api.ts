@@ -134,6 +134,22 @@ export type RecommendedRoute = {
   executionHint: ExecutionHint | null;
 };
 
+/** 내가 친 경로 교정 (친 경로 그대로 두께·세기를 고친다) */
+export type PlayedRoute = {
+  played: {
+    firstObjectBall: Ball;
+    secondObjectBall: Ball;
+    cutDeg: number;
+    thickness: string;
+    cushionOrder: ("long" | "short")[];
+    missGapM: number | null;
+    stoppedShort: boolean;
+  } | null;
+  correction: { route: RecommendedRoute; cutChangeDeg: number; change: "thicker" | "thinner" | "keep"; stronger: boolean } | null;
+  reason: "not_measured" | "no_scoring_window" | null;
+  message: string;
+};
+
 export type RouteResponse = {
   shotId: number;
   level: CoachingLevel;
@@ -144,7 +160,8 @@ export type RouteResponse = {
   applicable: boolean;
   reason: "shot_succeeded" | "result_unknown" | null;
   failure: string | null;
-  routes: RecommendedRoute[];
+  playedRoute: PlayedRoute | null; // 친 경로 교정 (먼저 보여 준다)
+  routes: RecommendedRoute[]; // 교정이 있으면 교정보다 쉬운 경로만
   disclaimer: string;
 };
 

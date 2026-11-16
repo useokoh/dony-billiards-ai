@@ -433,6 +433,12 @@
   color: var(--accent-ink);
   font-weight: 700;
 }
+.coachingHeading {
+  margin: 8px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
 .routes {
   list-style: none;
   margin: 0;

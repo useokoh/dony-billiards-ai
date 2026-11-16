@@ -115,6 +115,30 @@ export interface RouteComparison {
 export type FailureKind =
   'no_first_hit' | 'no_second_hit' | 'not_enough_cushions' | 'unspecified'; // 실패지만 원인을 모름 (예: 사람이 불인정한 샷)
 
+/** 내가 친 경로 교정 (A안: 친 경로를 먼저 고치고, 다른 경로는 더 쉬울 때만 보조로 보여 준다) */
+export interface PlayedRouteDto {
+  /** 실제로 친 경로. 첫 목적구를 못 맞혔거나 쿠션을 먼저 맞힌 샷 등은 잴 수 없어 null */
+  played: {
+    firstObjectBall: 'white' | 'yellow' | 'red';
+    secondObjectBall: 'white' | 'yellow' | 'red';
+    cutDeg: number; // 자르는 각 (부호 없음, 0 = 정면)
+    thickness: Thickness;
+    cushionOrder: RailKind[]; // 첫 목적구 뒤 두 번째 목적구 전까지 닿은 쿠션
+    missGapM: number | null; // 2적구를 놓친 거리 (공 표면 사이, m)
+    stoppedShort: boolean; // 2적구에 가장 가까이 간 뒤 30cm도 못 가고 멈춤 (힘 부족 의심)
+  } | null;
+  /** 같은 경로로 득점하는 교정값. 같은 경로로는 득점 구간이 없으면 null */
+  correction: {
+    route: RecommendedRouteDto; // 교정된 경로 (좌표·실행 코칭 포함)
+    cutChangeDeg: number; // 자르는 각을 얼마나 바꾸는지 (도)
+    change: 'thicker' | 'thinner' | 'keep';
+    stronger: boolean; // 한 단계 더 세게
+  } | null;
+  /** not_measured: 친 경로를 잴 수 없음, no_scoring_window: 같은 경로로는 득점이 계산되지 않음 */
+  reason: 'not_measured' | 'no_scoring_window' | null;
+  message: string;
+}
+
 export interface RouteResponse {
   shotId: number;
   level: CoachingLevel;
@@ -127,6 +151,9 @@ export interface RouteResponse {
   applicable: boolean;
   reason: 'shot_succeeded' | 'result_unknown' | null;
   failure: FailureKind | null;
+  /** 내가 친 경로 교정. 실패 샷에서 배치를 계산할 수 있을 때만 (아니면 null) */
+  playedRoute: PlayedRouteDto | null;
+  /** 다른 추천 경로. 교정이 있으면 교정보다 쉬운 경로만 보조로 남긴다 */
   routes: RecommendedRouteDto[];
   disclaimer: string;
 }

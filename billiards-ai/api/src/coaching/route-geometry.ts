@@ -476,8 +476,9 @@ function toPlan(
   w: Window,
   model: RouteModel,
   level: CoachingLevel,
+  aim: Shot = w.shots[Math.floor(w.shots.length / 2)], // 겨냥할 두께 (기본: 허용 폭 가운데)
 ): PlannedRoute {
-  const mid = w.shots[Math.floor(w.shots.length / 2)];
+  const mid = aim;
   const C = toPx(layout[cueBall]);
   const f = 1 - Math.sin((Math.abs(mid.cut) * Math.PI) / 180);
   const points = [C, mid.ghost, ...mid.sim.banks, mid.sim.hitPoint!].map(
@@ -637,6 +638,46 @@ export function planAlternatives(
   count = 3,
 ): PlannedRoute[] {
   return candidatePlans(layout, cueBall, model, level).slice(0, count);
+}
+
+/**
+ * 내가 친 경로 교정: 실제로 친 첫 목적구·쿠션 순서·맞힌 쪽은 그대로 두고, 득점이 되는 두께 중
+ * 실제 두께에 가장 가까운 것을 찾는다. 허용 폭 가장자리는 조금만 어긋나도 실패하므로
+ * 폭이 넉넉하면 바깥 1/4은 빼고 고른다. 같은 경로로 득점이 안 되면 null.
+ */
+export function planCorrection(
+  layout: Record<BallName, Point>,
+  cueBall: BallName,
+  first: BallName,
+  playedRails: Rail[],
+  playedCut: number,
+  model: RouteModel,
+  level: CoachingLevel,
+  edgeMargin = 0.25, // 허용 폭 양쪽에서 빼고 고를 비율 (0 = 가장자리까지)
+): PlannedRoute | null {
+  // 같은 경로 = 첫 목적구가 같고, 친 쿠션 순서의 앞 두 개(친 만큼)가 같다
+  const prefix = playedRails.slice(0, 2);
+  let chosen: { w: Window; shot: Shot; gap: number } | null = null;
+  for (const w of scoringWindows(layout, cueBall, model)) {
+    if (w.first !== first || !prefix.every((r, i) => w.rails[i] === r))
+      continue;
+    const n = w.shots.length;
+    const cut = n >= 4 ? Math.floor(n * edgeMargin) : 0;
+    const inner = w.shots.slice(cut, n - cut);
+    for (const shot of inner) {
+      // 1적구의 반대쪽을 맞히는 것은 다른 경로다
+      if (
+        Math.abs(playedCut) >= 1 &&
+        Math.sign(shot.cut) !== Math.sign(playedCut)
+      )
+        continue;
+      const gap = Math.abs(shot.cut - playedCut);
+      if (!chosen || gap < chosen.gap) chosen = { w, shot, gap };
+    }
+  }
+  return chosen
+    ? toPlan(layout, cueBall, chosen.w, model, level, chosen.shot)
+    : null;
 }
 
 export { matchesOrder };

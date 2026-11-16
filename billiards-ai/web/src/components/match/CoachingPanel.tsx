@@ -46,8 +46,8 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
         if (!alive) return;
         setError(null);
         setData({ route, feedback });
-        // 처음에는 1순위 경로를 그림에 표시한다
-        onSelect(route.routes[0] ?? null);
+        // 처음에는 친 경로 교정(없으면 1순위 경로)을 그림에 표시한다
+        onSelect(route.playedRoute?.correction?.route ?? route.routes[0] ?? null);
       })
       .catch((e: Error) => alive && setError(e.message));
     return () => {
@@ -96,66 +96,38 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
           </p>
 
           <ul className={styles.messages}>
-            {current.feedback.items.map((it, i) => (
-              <li key={i}>
-                {it.source === "user" && <b>코치 메모 · </b>}
-                {it.message}
-              </li>
-            ))}
+            {current.feedback.items
+              // 교정 문장은 아래 교정 카드에 이미 있다
+              .filter((it) => !(it.kind === "correction" && current.route.playedRoute?.correction))
+              .map((it, i) => (
+                <li key={i}>
+                  {it.source === "user" && <b>코치 메모 · </b>}
+                  {it.message}
+                </li>
+              ))}
           </ul>
+
+          {current.route.playedRoute?.correction && (
+            <>
+              <h3 className={styles.coachingHeading}>내가 친 경로 교정</h3>
+              <ol className={styles.routes} aria-label="내가 친 경로 교정">
+                <RouteCard
+                  r={current.route.playedRoute.correction.route}
+                  label="교정"
+                  selected={selectedRank === current.route.playedRoute.correction.route.rank}
+                  onSelect={onSelect}
+                />
+              </ol>
+              <h3 className={styles.coachingHeading}>더 쉬운 다른 경로</h3>
+              {!current.route.routes.length && (
+                <p className={styles.confirmHint}>친 경로보다 확실히 쉬운 다른 경로는 없습니다.</p>
+              )}
+            </>
+          )}
 
           <ol className={styles.routes} aria-label="추천 경로">
             {current.route.routes.map((r) => (
-              <li key={r.rank}>
-                <button
-                  type="button"
-                  className={styles.routeCard}
-                  aria-pressed={selectedRank === r.rank}
-                  onClick={() => onSelect(selectedRank === r.rank ? null : r)}
-                >
-                  <span className={styles.routeHead}>
-                    <span className={styles.routeRank}>{r.rank}</span>
-                    <span className={styles.routeTitle}>{r.description}</span>
-                    <span
-                      className={styles.tag_muted}
-                      title={
-                        r.comparison
-                          ? `초급 기준 성공률 ${pct(r.comparison.referenceSuccess)} (레벨과 상관없는 쉬움 지수)`
-                          : undefined
-                      }
-                    >
-                      {DIFFICULTY[r.difficulty]}
-                    </span>
-                  </span>
-                  {r.expectedSuccess !== null && r.comparison && (
-                    <span className={styles.routeStats}>
-                      <span>
-                        <b>{pct(r.expectedSuccess)}</b>기대 성공률
-                      </span>
-                      <span>
-                        <b>±{r.comparison.directionWindowDeg / 2}°</b>방향 허용 폭
-                      </span>
-                      <span>
-                        <b>{LAYOUT_TEXT[r.comparison.nextLayout.rating]}</b>다음 배치
-                      </span>
-                    </span>
-                  )}
-                  {r.executionHint && (
-                    <ShotDiagrams
-                      hint={r.executionHint}
-                      pathLengthM={r.comparison?.pathLengthM ?? null}
-                      cueSpeedMps={r.comparison?.cueSpeedMps ?? null}
-                    />
-                  )}
-                  {r.executionHint && <HintTable hint={r.executionHint} />}
-                  {r.rationale && <span className={styles.routeWhy}>{r.rationale}</span>}
-                  <span className={styles.statSub}>
-                    {r.points ? "그림에 점선으로 표시" : "공 배치로 계산할 수 없는 경로라 그림 없음"}
-                    {r.comparison && ` · 수구 이동 약 ${r.comparison.pathLengthM}m`}
-                    {r.confidence !== null && ` · 경로 모델 전 구간 재현율 ${pct(r.confidence)}`}
-                  </span>
-                </button>
-              </li>
+              <RouteCard key={r.rank} r={r} selected={selectedRank === r.rank} onSelect={onSelect} />
             ))}
           </ol>
         </>
@@ -192,5 +164,70 @@ function HintTable({ hint }: { hint: NonNullable<RecommendedRoute["executionHint
       <dt>권장 강약</dt>
       <dd>{hint.strength.label}</dd>
     </dl>
+  );
+}
+
+function RouteCard({
+  r,
+  label,
+  selected,
+  onSelect,
+}: {
+  r: RecommendedRoute;
+  label?: string;
+  selected: boolean;
+  onSelect: (route: RecommendedRoute | null) => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className={styles.routeCard}
+        aria-pressed={selected}
+        onClick={() => onSelect(selected ? null : r)}
+      >
+        <span className={styles.routeHead}>
+          <span className={styles.routeRank}>{label ?? r.rank}</span>
+          <span className={styles.routeTitle}>{r.description}</span>
+          <span
+            className={styles.tag_muted}
+            title={
+              r.comparison
+                ? `초급 기준 성공률 ${pct(r.comparison.referenceSuccess)} (레벨과 상관없는 쉬움 지수)`
+                : undefined
+            }
+          >
+            {DIFFICULTY[r.difficulty]}
+          </span>
+        </span>
+        {r.expectedSuccess !== null && r.comparison && (
+          <span className={styles.routeStats}>
+            <span>
+              <b>{pct(r.expectedSuccess)}</b>기대 성공률
+            </span>
+            <span>
+              <b>±{r.comparison.directionWindowDeg / 2}°</b>방향 허용 폭
+            </span>
+            <span>
+              <b>{LAYOUT_TEXT[r.comparison.nextLayout.rating]}</b>다음 배치
+            </span>
+          </span>
+        )}
+        {r.executionHint && (
+          <ShotDiagrams
+            hint={r.executionHint}
+            pathLengthM={r.comparison?.pathLengthM ?? null}
+            cueSpeedMps={r.comparison?.cueSpeedMps ?? null}
+          />
+        )}
+        {r.executionHint && <HintTable hint={r.executionHint} />}
+        {r.rationale && <span className={styles.routeWhy}>{r.rationale}</span>}
+        <span className={styles.statSub}>
+          {r.points ? "그림에 점선으로 표시" : "공 배치로 계산할 수 없는 경로라 그림 없음"}
+          {r.comparison && ` · 수구 이동 약 ${r.comparison.pathLengthM}m`}
+          {r.confidence !== null && ` · 경로 모델 전 구간 재현율 ${pct(r.confidence)}`}
+        </span>
+      </button>
+    </li>
   );
 }

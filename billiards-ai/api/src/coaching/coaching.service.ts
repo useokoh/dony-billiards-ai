@@ -10,10 +10,13 @@ import {
   type RecommendedRouteDto,
   type RouteResponse,
 } from './coaching.types.js';
+import { measurePlayed } from './played-route.js';
 import {
+  buildCorrection,
   buildFeedbackItems,
   buildRuleRoutes,
   classifyFailure,
+  easierThan,
 } from './route-rules.js';
 import { mapStoredRoutes } from './stored-route.js';
 import {
@@ -46,6 +49,10 @@ export class CoachingService {
             points: true,
             estimated: true,
           },
+        },
+        events: {
+          select: { kind: true, frameNo: true, target: true },
+          orderBy: { seq: 'asc' },
         },
       },
     });
@@ -81,20 +88,34 @@ export class CoachingService {
       }
     }
     // 샷 시작 배치: 궤적이 있으면 추천 경로 좌표·방향을 계산한다
-    const layout = startLayout(toBallPaths(shot.trajectories ?? []));
+    const paths = toBallPaths(shot.trajectories ?? []);
+    const layout = startLayout(paths);
     const geometry: ShotGeometry | null =
       layout && (shot.cueBall === 'white' || shot.cueBall === 'yellow')
         ? { layout, cueBall: shot.cueBall as BallName }
+        : null;
+    // 실제로 친 경로 (교정 코칭용). 수구 궤적 행의 시작 프레임·간격으로 사건 프레임을 맞춘다
+    const cueRow = shot.trajectories?.find((t) => t.ball === shot.cueBall);
+    const played =
+      geometry && paths && cueRow
+        ? measurePlayed(
+            paths,
+            shot.events ?? [],
+            geometry.cueBall,
+            cueRow.startFrame,
+            cueRow.step,
+          )
         : null;
     return {
       resolved: resolveLevel(query, player),
       classification: classifyFailure(shot),
       geometry,
+      played,
     };
   }
 
   async route(shotId: number, query: CoachingQuery): Promise<RouteResponse> {
-    const { resolved, classification, geometry } = await this.context(
+    const { resolved, classification, geometry, played } = await this.context(
       shotId,
       query,
     );
@@ -116,20 +137,26 @@ export class CoachingService {
         reason:
           classification === 'success' ? 'shot_succeeded' : 'result_unknown',
         failure: null,
+        playedRoute: null,
         routes: [],
       };
     }
+    const playedRoute = geometry
+      ? buildCorrection(played, geometry, resolved.level)
+      : null;
+    const routes = await this.routesFor(
+      shotId,
+      classification,
+      resolved.level,
+      geometry,
+    );
     return {
       ...base,
       applicable: true,
       reason: null,
       failure: classification,
-      routes: await this.routesFor(
-        shotId,
-        classification,
-        resolved.level,
-        geometry,
-      ),
+      playedRoute,
+      routes: easierThan(routes, playedRoute?.correction ?? null),
     };
   }
 
@@ -137,7 +164,7 @@ export class CoachingService {
     shotId: number,
     query: CoachingQuery,
   ): Promise<FeedbackResponse> {
-    const { resolved, classification, geometry } = await this.context(
+    const { resolved, classification, geometry, played } = await this.context(
       shotId,
       query,
     );
@@ -158,12 +185,34 @@ export class CoachingService {
       resolved.level,
       geometry,
     );
-    const items = buildFeedbackItems(
-      classification,
-      resolved.level,
-      routes,
-      resolved.targetHandicap,
-    );
+    // A안: 내가 친 경로 교정을 먼저 말하고, 다른 경로는 교정보다 쉬울 때만 이어서 말한다
+    const playedRoute = geometry
+      ? buildCorrection(played, geometry, resolved.level)
+      : null;
+    const items: FeedbackItem[] = [
+      ...(playedRoute
+        ? [
+            {
+              kind: 'correction',
+              source: 'auto' as const,
+              targetHandicap: resolved.targetHandicap,
+              message: playedRoute.message,
+            },
+          ]
+        : []),
+      // 교정이 있으면 요약·권장 실행 문장도 교정 경로 기준으로 만든다
+      ...buildFeedbackItems(
+        classification,
+        resolved.level,
+        playedRoute?.correction
+          ? [
+              playedRoute.correction.route,
+              ...easierThan(routes, playedRoute.correction),
+            ]
+          : routes,
+        resolved.targetHandicap,
+      ),
+    ];
 
     // 저장된 피드백(사람이 쓴 것 포함): 핸디 지정이 없거나 요청 핸디와 같은 것만
     const stored = await this.prisma.feedback.findMany({
