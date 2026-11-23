@@ -11,7 +11,7 @@
 | 데이터베이스 | [database](database.md) | SQLite 스키마 개선, 분석 JSON 가져오기, 조회·영상 재생·득점 인정·목표 핸디별 코칭 API, 득점 자동 확정 저장과 사람 확인 보존, 궤적·선수 연결·배치 기반 추천 경로, 기대 성공률·고급 비교, 난이도별 선택 기준(쉬움 지수), 영상 업로드·분석 실행 API | 2026-11-16 |
 | 공 인식 | [ball-detection](ball-detection.md) | 1~4단계 공 찾기, 궤적, 샷·쿠션 판정, 이닝·샷 영상, ⑨ 득점 자동 확정(물리+차례), 샷별 궤적 내보내기, 추천 경로 모델 실측 보정 | 2026-11-09 |
 | 개발 환경 | [environment](environment.md) | Next.js, NestJS, Prisma, SQLite, Python, FFmpeg 구축과 검증, 백엔드 연결 오류 원인, GitHub 저장소(공개 전환, 커밋 이메일 noreply) | 2026-11-09 |
-| 앱 디자인 | [app-design](app-design.md) | 휴대폰 웹 7개 화면 시안, 스플래시, 경기 목록·상세 화면 API 연결, 경로 그림·코칭 탭·선수 관리, 당점·두께·세기 그림 | 2026-11-09 |
+| 앱 디자인 | [app-design](app-design.md) | 휴대폰 웹 7개 화면 시안, 스플래시, 경기 목록·상세 화면 API 연결, 경로 그림·코칭 탭·선수 관리, 당점·두께·세기 그림, 코칭 그림 선 켜고 끄기 | 2026-11-23 |
 | 작업 규칙 | [work-rules](work-rules.md) | 저장 위치, 문서 표현, worklog 방식 | 2026-11-02 |
 | 기술 결정 | [tech-decisions](tech-decisions.md) | Next.js, NestJS, Python 분석, SQLite, 3쿠션, 1~2시간 영상 자동 정리 | 2026-11-02 |
 | 기획 문서 | [planning-docs](planning-docs.md) | 기획서 8장과 기술스택 문서 작성 | 2026-10-19 |

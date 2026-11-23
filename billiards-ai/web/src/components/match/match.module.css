@@ -399,6 +399,12 @@
   font-size: 12px;
   color: var(--muted);
 }
+.layerToggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
 .viewToggle {
   display: flex;
   gap: 6px;

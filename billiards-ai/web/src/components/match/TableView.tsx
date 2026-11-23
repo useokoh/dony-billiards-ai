@@ -1,7 +1,10 @@
+"use client";
+
 // 당구대 그림: 샷의 실제 경로(공별 색)와 선택한 추천 경로(점선)를 함께 그린다.
 // 좌표는 당구대 안쪽 기준 0~1, 화면 비율은 2:1 (analyzer/trajectory.py)
 import type { Ball, Point, RecommendedRoute, Trajectory } from "@/lib/api";
 import { BALL_COLOR, BALL_NAME } from "@/lib/shot-text";
+import { useState } from "react";
 import styles from "./match.module.css";
 
 const W = 1000;
@@ -9,6 +12,15 @@ const H = 500;
 const PAD = 28; // 쿠션(나무 테) 두께
 const R = (18 / 740) * H; // 공 반지름 (실제 비율)
 const BALLS: Ball[] = ["white", "yellow", "red"];
+
+// 코칭 그림에서 켜고 끌 수 있는 선
+const LAYERS = [
+  { key: "actual", label: "실제 경로" },
+  { key: "route", label: "추천 경로" },
+  { key: "object", label: "1적구 진행" },
+  { key: "stop", label: "예상 정지" },
+] as const;
+type Layer = (typeof LAYERS)[number]["key"];
 
 const px = ([x, y]: Point) => [PAD + x * W, PAD + y * H] as const;
 const toPath = (pts: Point[]) => pts.map((p) => px(p).join(",")).join(" ");
@@ -22,6 +34,9 @@ type Props = {
 export default function TableView({ trajectory, route, loading }: Props) {
   const balls = trajectory?.balls ?? null;
   const routePts = route?.points ?? null;
+  const [off, setOff] = useState<Layer[]>([]);
+  const show = (l: Layer) => !off.includes(l);
+  const toggle = (l: Layer) => setOff((o) => (o.includes(l) ? o.filter((x) => x !== l) : [...o, l]));
   return (
     <figure className={styles.table}>
       <svg viewBox={`0 0 ${W + PAD * 2} ${H + PAD * 2}`} role="img" aria-label="당구대 위 공 경로 그림">
@@ -43,6 +58,7 @@ export default function TableView({ trajectory, route, loading }: Props) {
 
         {/* 실제 경로 */}
         {balls &&
+          show("actual") &&
           BALLS.map((b) => {
             const path = balls[b];
             if (!path || path.points.length < 2) return null;
@@ -60,7 +76,7 @@ export default function TableView({ trajectory, route, loading }: Props) {
           })}
 
         {/* 추천 경로 (무회전 기하 경로, 참고용) */}
-        {routePts && (
+        {routePts && show("route") && (
           <g>
             <polyline
               points={toPath(routePts)}
@@ -85,7 +101,7 @@ export default function TableView({ trajectory, route, loading }: Props) {
         )}
 
         {/* 1적구 예상 진행선 (점선, 1적구 색): 쫑 위험은 이 선을 보고 판단한다 (예측은 아직 못 함) */}
-        {route?.comparison && route.executionHint?.firstObjectBall && route.comparison.objectPath.length > 1 && (
+        {show("object") && route?.comparison && route.executionHint?.firstObjectBall && route.comparison.objectPath.length > 1 && (
           <polyline
             points={toPath(route.comparison.objectPath)}
             fill="none"
@@ -97,7 +113,7 @@ export default function TableView({ trajectory, route, loading }: Props) {
         )}
 
         {/* 추천 경로의 예상 정지 위치 (점선 원): 1적구는 실측 이동 거리로 추정, 수구는 두 번째 목적구 접점 */}
-        {route?.comparison && route.executionHint?.firstObjectBall && (
+        {show("stop") && route?.comparison && route.executionHint?.firstObjectBall && (
           <g fill="none" strokeDasharray="5 5" strokeWidth="2.5">
             <circle
               cx={px(route.comparison.nextLayout.objectBallEnd)[0]}
@@ -144,6 +160,21 @@ export default function TableView({ trajectory, route, loading }: Props) {
               ? "실선: 실제 경로 · 파란 점선: 추천 경로 · 숫자: 쿠션 순서 · 공 색 점선: 1적구 예상 진행 · 점선 원: 예상 정지 위치"
               : "실선: 실제 경로 · 진한 공: 시작 위치 · 옅은 공: 멈춘 위치"}
       </figcaption>
+      {routePts && balls && (
+        <div className={styles.layerToggle} role="group" aria-label="그림에 표시할 선">
+          {LAYERS.map((l) => (
+            <button
+              key={l.key}
+              type="button"
+              aria-pressed={show(l.key)}
+              className={styles.levelChip}
+              onClick={() => toggle(l.key)}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+      )}
     </figure>
   );
 }
