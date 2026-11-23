@@ -185,7 +185,8 @@
 
 .tag_accent,
 .tag_strong,
-.tag_muted {
+.tag_muted,
+.tag_warn {
   font-size: 12px;
   font-weight: 600;
 }
@@ -200,6 +201,17 @@
 
 .tag_muted {
   color: var(--muted);
+}
+
+.tag_warn {
+  color: var(--warn);
+}
+
+.shotFilter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 /* 샷 피드백 */

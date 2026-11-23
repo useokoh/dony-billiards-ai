@@ -1,32 +1,16 @@
 "use client";
 
-// 목표 핸디별 추천 경로·실행 코칭 (Docs/기술스택.md 3.4, 7.1)
+// 추천 경로·실행 코칭 (Docs/기술스택.md 3.4, 7.1)
 // 두께·회전·당점·강약은 모두 "권장값"이다. 영상으로 실제 회전·힘을 판정한 값처럼 보이지 않게 표시한다.
+// 레벨 구분은 결과가 거의 같아 의미가 없어 뺐다: 한 기준(초급 쉬움 지수)으로 교정 + 더 쉬운 경로 하나만 보여 준다.
 import { useEffect, useState } from "react";
-import { api, type CoachingLevel, type FeedbackResponse, type RecommendedRoute, type RouteResponse } from "@/lib/api";
+import { api, type FeedbackResponse, type RecommendedRoute, type RouteResponse } from "@/lib/api";
 import { BALL_COLOR, BALL_NAME } from "@/lib/shot-text";
 import styles from "./match.module.css";
 import ShotDiagrams from "./ShotDiagrams";
 
-type Choice = "profile" | CoachingLevel;
-
-const CHOICES: { value: Choice; label: string }[] = [
-  { value: "profile", label: "선수 기준" },
-  { value: "beginner", label: "초급 20" },
-  { value: "intermediate", label: "중급 27" },
-  { value: "advanced", label: "고급 27+" },
-];
-// 경로 자체의 난이도 (초급 기준 성공률로 정함: 0.35 이상 초급용, 0.25 이상 중급용)
-const DIFFICULTY: Record<CoachingLevel, string> = { beginner: "초급용", intermediate: "중급용", advanced: "고급용" };
 const LAYOUT_TEXT = { good: "모여 있음", normal: "보통", hard: "흩어짐" } as const;
 const pct = (v: number) => `${Math.round(v * 100)}%`;
-const SOURCE_TEXT: Record<RouteResponse["levelSource"], string> = {
-  "query-level": "직접 고른 난이도",
-  "query-handicap": "입력한 목표 핸디",
-  player: "선수 프로필의 목표 핸디",
-  default: "선수 정보가 없어 초급 기준",
-};
-
 type Props = {
   shotId: number;
   selectedRank: number | null;
@@ -34,14 +18,13 @@ type Props = {
 };
 
 export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props) {
-  const [choice, setChoice] = useState<Choice>("profile");
   const [data, setData] = useState<{ route: RouteResponse; feedback: FeedbackResponse } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    const level = choice === "profile" ? undefined : choice;
-    Promise.all([api.route(shotId, level), api.coachingFeedback(shotId, level)])
+    // 선수 프로필과 상관없이 늘 같은 기준으로 계산한다
+    Promise.all([api.route(shotId, "beginner"), api.coachingFeedback(shotId, "beginner")])
       .then(([route, feedback]) => {
         if (!alive) return;
         setError(null);
@@ -53,30 +36,15 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
     return () => {
       alive = false;
     };
-    // onSelect는 부모가 매번 새로 만들 수 있어 의존성에서 뺀다 (샷·난이도가 바뀔 때만 다시 부른다)
+    // onSelect는 부모가 매번 새로 만들 수 있어 의존성에서 뺀다 (샷이 바뀔 때만 다시 부른다)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shotId, choice]);
+  }, [shotId]);
 
   // 샷이 바뀌는 동안 이전 샷의 결과를 보여 주지 않는다
   const current = data && data.route.shotId === shotId ? data : null;
 
   return (
     <div className={styles.coaching}>
-      <div className={styles.levelPicker} role="radiogroup" aria-label="코칭 난이도">
-        {CHOICES.map((c) => (
-          <button
-            key={c.value}
-            type="button"
-            role="radio"
-            aria-checked={choice === c.value}
-            className={styles.levelChip}
-            onClick={() => setChoice(c.value)}
-          >
-            {c.label}
-          </button>
-        ))}
-      </div>
-
       {error && <p className={styles.errorLine}>{error}</p>}
       {!current && !error && <p className={styles.confirmHint}>불러오는 중입니다.</p>}
 
@@ -84,17 +52,12 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
         <p className={styles.notice}>
           {current.route.reason === "shot_succeeded"
             ? "득점한 샷입니다. 추천 경로와 코칭은 실패한 샷에만 제공합니다."
-            : "아직 득점 여부가 판정되지 않은 샷입니다."}
+            : "자동 판정이 안 된 샷입니다. 샷 피드백 탭에서 인정·불인정을 고르면 바로 코칭합니다."}
         </p>
       )}
 
       {current?.route.applicable && (
         <>
-          <p className={styles.shotMeta}>
-            목표 핸디 {current.route.targetHandicap ?? current.route.targetHandicapLabel} 기준 ·{" "}
-            {SOURCE_TEXT[current.route.levelSource]}
-          </p>
-
           <ul className={styles.messages}>
             {current.feedback.items
               // 교정 문장은 아래 교정 카드에 이미 있다
@@ -118,15 +81,19 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
                   onSelect={onSelect}
                 />
               </ol>
-              <h3 className={styles.coachingHeading}>더 쉬운 다른 경로</h3>
               {!current.route.routes.length && (
                 <p className={styles.confirmHint}>친 경로보다 확실히 쉬운 다른 경로는 없습니다.</p>
               )}
             </>
           )}
 
+          {current.route.routes.length > 0 && (
+            <h3 className={styles.coachingHeading}>
+              {current.route.playedRoute?.correction ? "더 쉬운 다른 경로" : "추천 경로"}
+            </h3>
+          )}
           <ol className={styles.routes} aria-label="추천 경로">
-            {current.route.routes.map((r) => (
+            {current.route.routes.slice(0, 1).map((r) => (
               <RouteCard key={r.rank} r={r} selected={selectedRank === r.rank} onSelect={onSelect} />
             ))}
           </ol>
@@ -136,7 +103,7 @@ export default function CoachingPanel({ shotId, selectedRank, onSelect }: Props)
       {current && (
         <p className={styles.disclaimer}>
           {current.route.disclaimer} 경로는 이 당구대의 실제 경기 영상에서 잰 쿠션 반사·충돌 꺾임으로 굴려 본 것입니다. 쫑은 아직 예측하지 못합니다(실제 영상으로 시험한 결과 우연 수준). 그림의 1적구 예상 진행선(공 색 점선)을 보고 판단해 주세요.
-          기대 성공률은 고른 난이도의 실행 오차를 가정한 값이고, 경로의 초급용·중급용·고급용 표시는 레벨과 상관없이 초급 기준 성공률로 정합니다. 다음 배치는 1적구 이동 거리 실측 중앙값으로 추정한 참고값입니다.
+          기대 성공률은 실행 오차를 크게 잡은 보수적인 값입니다. 다음 배치는 1적구 이동 거리 실측 중앙값으로 추정한 참고값입니다.
         </p>
       )}
     </div>
@@ -189,16 +156,6 @@ function RouteCard({
         <span className={styles.routeHead}>
           <span className={styles.routeRank}>{label ?? r.rank}</span>
           <span className={styles.routeTitle}>{r.description}</span>
-          <span
-            className={styles.tag_muted}
-            title={
-              r.comparison
-                ? `초급 기준 성공률 ${pct(r.comparison.referenceSuccess)} (레벨과 상관없는 쉬움 지수)`
-                : undefined
-            }
-          >
-            {DIFFICULTY[r.difficulty]}
-          </span>
         </span>
         {r.expectedSuccess !== null && r.comparison && (
           <span className={styles.routeStats}>

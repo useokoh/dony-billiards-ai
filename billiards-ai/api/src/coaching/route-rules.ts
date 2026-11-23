@@ -6,7 +6,6 @@
 // 어느 쪽도 실제 사용한 회전·힘을 판정한 값이 아니다 (Docs/기술스택.md 3.3).
 import type { BallName, Layout } from '../trajectory/trajectory.js';
 import {
-  LEVEL_HANDICAP_LABEL,
   type CoachingLevel,
   type ExecutionHint,
   type FailureKind,
@@ -722,8 +721,6 @@ export function buildFeedbackItems(
 ): FeedbackItem[] {
   const top = routes[0];
   if (!top) return [];
-  const label = LEVEL_HANDICAP_LABEL[level];
-  const handicapText = targetHandicap === null ? label : `${targetHandicap}`;
   const hint = top.executionHint;
   const route = hint?.cushionPlan.label ?? top.description;
   const item = (kind: string, message: string): FeedbackItem => ({
@@ -736,7 +733,7 @@ export function buildFeedbackItems(
   const items: FeedbackItem[] = [
     item(
       'route',
-      `${FAILURE_SENTENCE[failure]} 목표 핸디 ${handicapText}에서는 ${route} 경로를 우선 시도하세요.`,
+      `${FAILURE_SENTENCE[failure]} ${route} 경로를 우선 시도하세요.`,
     ),
   ];
   if (hint) {

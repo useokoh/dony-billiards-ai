@@ -18,6 +18,18 @@ export type MatchSummary = {
   inningCount: number;
   shotCount: number;
   candidateCount?: number; // 목록에서만 내려온다
+  reviewCount?: number; // 목록에서만: 사람 확인이 필요한 샷 수
+};
+
+/** 영상 업로드 후 분석 작업 (api/src/uploads) */
+export type UploadJob = {
+  id: string;
+  video: string;
+  status: "queued" | "running" | "done" | "failed";
+  step: string | null;
+  progress: number;
+  matchId: number | null;
+  error: string | null;
 };
 
 export type MatchDetail = MatchSummary & {
@@ -173,16 +185,6 @@ export type FeedbackResponse = {
   disclaimer: string;
 };
 
-export type PlayerProfile = {
-  id: number;
-  name: string;
-  currentHandicap: number | null;
-  targetHandicap: number | null;
-  coachingLevel: CoachingLevel | null;
-};
-
-export type PlayerInput = Partial<Omit<PlayerProfile, "id">>;
-
 // 휴대폰에서 Mac 주소로 접속해도 같은 컴퓨터의 백엔드를 찾도록 현재 주소를 쓴다.
 // 포트는 기본 4000. 테스트용 서버를 따로 띄울 때만 NEXT_PUBLIC_API_PORT로 바꾼다(빌드 때 고정됨).
 const API_PORT = process.env.NEXT_PUBLIC_API_PORT ?? "4000";
@@ -225,12 +227,34 @@ export const api = {
     request<RouteResponse>(`/shots/${id}/route${level ? `?level=${level}` : ""}`),
   coachingFeedback: (id: number, level?: CoachingLevel) =>
     request<FeedbackResponse>(`/shots/${id}/feedback${level ? `?level=${level}` : ""}`),
-  players: () => request<PlayerProfile[]>("/players"),
-  createPlayer: (input: PlayerInput) => send<PlayerProfile>("/players", "POST", input),
-  updatePlayer: (id: number, input: PlayerInput) => send<PlayerProfile>(`/players/${id}`, "PATCH", input),
-  setMatchPlayers: (id: number, input: { firstPlayerId?: number | null; secondPlayerId?: number | null }) =>
-    send<MatchDetail>(`/matches/${id}/players`, "PATCH", input),
+  uploadJob: (id: string) => request<UploadJob>(`/uploads/${id}`),
 };
+
+/**
+ * 경기 영상을 올린다. 1~2시간 영상은 몇 GB라 올리는 진행률을 보여 주려고 fetch 대신 XHR을 쓴다.
+ * 올리기가 끝나면 서버가 분석 작업을 예약하고 작업 정보를 돌려준다.
+ */
+export function uploadVideo(file: File, onProgress: (percent: number) => void): Promise<UploadJob> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", apiOrigin() + "/api/uploads");
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
+    xhr.onload = () => {
+      let body: (UploadJob & { message?: string }) | null = null;
+      try {
+        body = JSON.parse(xhr.responseText) as UploadJob & { message?: string };
+      } catch {
+        // JSON이 아닌 오류 응답(용량 초과 등)은 상태 코드로 알린다
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body) resolve(body);
+      else reject(new Error(body?.message ?? `올리기 실패 (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error("서버에 연결하지 못했습니다"));
+    const form = new FormData();
+    form.append("video", file);
+    xhr.send(form);
+  });
+}
 
 function send<T>(path: string, method: "POST" | "PATCH", body: unknown) {
   return request<T>(path, {

@@ -91,9 +91,9 @@ export function parseMatchPlayersBody(body: unknown): MatchPlayersInput {
 export class MatchesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** 경기 목록 (최근 경기 먼저). 카드에 쓰는 득점 후보 수를 함께 센다 */
+  /** 경기 목록 (최근 경기 먼저). 카드에 쓰는 득점 후보 수와 확인 필요 샷 수를 함께 센다 */
   async list() {
-    const [rows, candidates] = await Promise.all([
+    const [rows, candidates, reviews] = await Promise.all([
       this.prisma.match.findMany({
         include: matchInclude,
         orderBy: [{ playedAt: 'desc' }, { id: 'desc' }],
@@ -103,13 +103,30 @@ export class MatchesService {
         where: { scoreCandidate: true },
         _count: { _all: true },
       }),
+      // 웹 샷 목록의 "확인 필요"와 같은 기준: 사람이 아직 안 봤고, 자동 판정 근거가 엇갈렸거나 판정을 못 한 샷
+      this.prisma.shot.groupBy({
+        by: ['matchId'],
+        where: {
+          scoreConfirmed: null,
+          OR: [
+            {
+              scoreBasis: { in: ['turn', 'physics'] },
+              result: { in: ['success', 'fail'] },
+            },
+            { result: { notIn: ['success', 'fail'] } },
+          ],
+        },
+        _count: { _all: true },
+      }),
     ]);
+    const reviewCount = new Map(reviews.map((c) => [c.matchId, c._count._all]));
     const candidateCount = new Map(
       candidates.map((c) => [c.matchId, c._count._all]),
     );
     return rows.map((m) => ({
       ...toMatchSummary(m),
       candidateCount: candidateCount.get(m.id) ?? 0,
+      reviewCount: reviewCount.get(m.id) ?? 0,
     }));
   }
 

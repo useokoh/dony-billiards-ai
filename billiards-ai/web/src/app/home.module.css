@@ -9,15 +9,10 @@
 }
 
 .header {
-  padding: 28px 16px 20px;
+  padding: 28px 16px 16px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.eyebrow {
-  font-size: 13px;
-  color: var(--muted);
 }
 
 .title {
@@ -40,49 +35,123 @@
   color: var(--soft);
 }
 
-.card {
+/* 영상 올리기 칸 */
+.drop {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
+  padding: 28px 16px;
+  border: 1.5px dashed var(--accent);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.drop:hover,
+.drop:focus-visible,
+.drop[data-dragging] {
+  background: var(--surface);
+}
+.drop:disabled {
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: default;
+}
+.dropTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.dropHint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* 올리기·분석 진행 카드 */
+.job {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 14px;
   background: var(--surface);
   border-radius: 10px;
 }
-
-.card:hover,
-.card:focus-visible {
-  background: var(--surface-strong);
-}
-
-.cardTop {
+.jobTop {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
   gap: 12px;
+  font-size: 14px;
 }
-
-.cardTitle {
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 600;
+.jobName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-.status,
-.statusAccent,
-.statusWarn {
-  flex-shrink: 0;
+.bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+.jobAction {
+  align-self: flex-start;
+  min-height: 36px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
   font-size: 13px;
-  line-height: 22px;
+  cursor: pointer;
+}
+
+.sectionTitle {
+  margin-top: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--muted);
 }
 
-.statusAccent {
-  color: var(--accent);
+/* 지난 경기 한 줄 */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  background: var(--surface);
+  border-radius: 10px;
 }
-
-.statusWarn {
-  color: var(--warn);
+.row:hover,
+.row:focus-visible {
+  background: var(--surface-strong);
+}
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.rowTitle {
+  font-size: 15px;
+  font-weight: 600;
+}
+.rowScore {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 500;
 }
 
 .meta {
@@ -90,26 +159,11 @@
   line-height: 18px;
   color: var(--muted);
 }
-
-.score {
-  display: flex;
-  align-items: baseline;
-  gap: 4px;
-  font-size: 14px;
-  color: var(--soft);
+.accent {
+  color: var(--accent);
 }
-
-.score b {
-  font-family: var(--font-mono);
-  font-size: 18px;
-  font-weight: 500;
-  color: var(--foreground);
-}
-
-.scoreNote {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--muted);
+.warn {
+  color: var(--warn);
 }
 
 .footer {

@@ -137,7 +137,7 @@ describe('buildFeedbackItems', () => {
   it('초급: 경로 + 실행값, 권장값 안내 포함', () => {
     const items = feedback('beginner', 20);
     expect(items.map((i) => i.kind)).toEqual(['route', 'execution']);
-    expect(items[0].message).toContain('목표 핸디 20');
+    expect(items[0].message).not.toContain('목표 핸디');
     expect(items[0].message).toContain('장쿠션 → 단쿠션 → 장쿠션');
     expect(items[1].message).toContain('1/2 두께');
     expect(items[1].message).toContain('권장값');
@@ -156,7 +156,6 @@ describe('buildFeedbackItems', () => {
       'summary',
       'summary',
     ]);
-    expect(adv[0].message).toContain('목표 핸디 27+');
     expect(adv[3].message).toContain('후보 비교');
   });
   it('실제 회전·힘을 단정하는 표현을 쓰지 않는다', () => {

@@ -21,12 +21,33 @@ export function needsReview(s: ScoreView): boolean {
   return s.scoredBy === "auto" && s.scoreBasis !== null && s.scoreBasis !== "agree";
 }
 
+/** 자동 판정을 못 해서 사람이 인정·불인정을 골라야 하는 샷 */
+export function autoFailed(s: ScoreView): boolean {
+  return s.scoredBy === "none";
+}
+
+/** 샷 목록 나누기: 득점 / 실패 / 확인 필요(자동 판정 실패 포함) */
+export type ShotFilter = "all" | "scored" | "missed" | "review";
+export const SHOT_FILTERS: { value: ShotFilter; label: string }[] = [
+  { value: "all", label: "전체" },
+  { value: "scored", label: "득점" },
+  { value: "missed", label: "실패" },
+  { value: "review", label: "확인 필요" },
+];
+export function matchesFilter(s: ScoreView, f: ShotFilter): boolean {
+  if (f === "scored") return s.scored;
+  if (f === "missed") return !s.scored && !autoFailed(s);
+  if (f === "review") return needsReview(s) || autoFailed(s);
+  return true;
+}
+
 /** 샷 목록 오른쪽 표시: 사람이 확인했으면 그 결과, 아니면 자동 판정 결과 */
 export function shotTag(s: ScoreView) {
   if (s.scoreConfirmed === true) return { text: "인정", tone: "strong" as const };
   if (s.scoreConfirmed === false) return { text: "불인정", tone: "muted" as const };
-  if (s.scored) return { text: needsReview(s) ? "득점·확인" : "득점", tone: "accent" as const };
-  if (needsReview(s)) return { text: "확인 권장", tone: "muted" as const };
+  if (autoFailed(s)) return { text: "자동판정 실패", tone: "warn" as const };
+  if (needsReview(s)) return { text: s.scored ? "득점 · 확인 필요" : "확인 필요", tone: "warn" as const };
+  if (s.scored) return { text: "득점", tone: "accent" as const };
   return null;
 }
 
@@ -73,9 +94,9 @@ export function matchSummaryText(innings: Inning[]): string {
   const shots = innings.flatMap((i) => i.shots);
   if (shots.length === 0) return "샷이 없습니다";
   const scored = shots.filter((s) => s.scored).length;
-  const review = shots.filter(needsReview).length;
+  const review = shots.filter((s) => needsReview(s) || autoFailed(s)).length;
   const avg = shots.reduce((sum, s) => sum + s.cushionCount, 0) / shots.length;
-  return `샷 ${shots.length}개 중 득점 ${scored}개${review ? ` (확인 권장 ${review}개)` : ""}, 평균 쿠션 ${avg.toFixed(1)}회`;
+  return `샷 ${shots.length}개 중 득점 ${scored}개${review ? ` (확인 필요 ${review}개)` : ""}, 평균 쿠션 ${avg.toFixed(1)}회`;
 }
 
 /** 11월 1일 19:38 */

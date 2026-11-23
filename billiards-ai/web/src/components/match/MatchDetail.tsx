@@ -5,18 +5,17 @@
 // 코칭 탭에서 고른 추천 경로가 당구대 그림에 점선으로 겹쳐 보인다.
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   absoluteUrl,
   api,
   type Inning,
   type MatchDetail as Match,
-  type PlayerProfile,
   type RecommendedRoute,
   type ShotDetail,
   type Trajectory,
 } from "@/lib/api";
-import { formatPlayedAt, matchSummaryText, withConfirmation } from "@/lib/shot-text";
+import { formatPlayedAt, matchSummaryText, type ShotFilter, withConfirmation } from "@/lib/shot-text";
 import CoachingPanel from "./CoachingPanel";
 import ShotFeedback from "./ShotFeedback";
 import TableView from "./TableView";
@@ -43,7 +42,10 @@ export default function MatchDetail() {
   // 코칭 탭에서 고른 추천 경로. 샷 번호와 함께 저장해 다른 샷으로 넘어가면 자동으로 무시한다
   const [picked, setPicked] = useState<{ shotId: number; route: RecommendedRoute | null } | null>(null);
   const route = picked && picked.shotId === shotId ? picked.route : null;
-  const [players, setPlayers] = useState<PlayerProfile[]>([]);
+  // 샷 목록 스크롤 위치: 다른 탭에 갔다 와도 보던 곳으로 돌아온다
+  const panelRef = useRef<HTMLDivElement>(null);
+  const listScroll = useRef(0);
+  const [filter, setFilter] = useState<ShotFilter>("all");
 
   // 경기 정보와 이닝별 샷 목록. 처음에는 첫 샷을 고른다.
   useEffect(() => {
@@ -56,11 +58,6 @@ export default function MatchDetail() {
       })
       .catch((e: Error) => setError(e.message));
   }, [matchId, validId]);
-
-  // 선수 목록 (선공·후공 연결용). 실패해도 화면은 그대로 쓴다
-  useEffect(() => {
-    api.players().then(setPlayers).catch(() => setPlayers([]));
-  }, []);
 
   // 고른 샷의 상세 (사건 순서, 영상 위치)와 궤적
   useEffect(() => {
@@ -78,6 +75,15 @@ export default function MatchDetail() {
       alive = false;
     };
   }, [shotId]);
+
+  useLayoutEffect(() => {
+    if (tab === "shots" && panelRef.current) panelRef.current.scrollTop = listScroll.current;
+  }, [tab]);
+  /** 탭을 바꾸기 전에 샷 목록에서 보던 위치를 기억한다 */
+  function openTab(next: Tab) {
+    if (tab === "shots" && panelRef.current) listScroll.current = panelRef.current.scrollTop;
+    setTab(next);
+  }
 
   // 이전·다음 샷 이동용 순서
   const order = useMemo(() => innings.flatMap((i) => i.shots.map((s) => s.id)), [innings]);
@@ -127,17 +133,6 @@ export default function MatchDetail() {
     }
   }
 
-  /** 선공·후공에 선수 프로필 연결 (코칭 난이도가 그 선수의 목표 핸디로 정해진다) */
-  async function linkPlayer(side: "firstPlayerId" | "secondPlayerId", value: string) {
-    if (!match) return;
-    try {
-      const m = await api.setMatchPlayers(match.id, { [side]: value ? Number(value) : null });
-      setMatch(m);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
   if (!validId || (error && !match)) {
     return (
       <div className={styles.screen}>
@@ -169,24 +164,6 @@ export default function MatchDetail() {
           {match.scoreFirst} : {match.scoreSecond}
         </span>
       </TopBar>
-
-      <div className={styles.playersBar}>
-        {(["firstPlayerId", "secondPlayerId"] as const).map((side) => (
-          <label key={side}>
-            {side === "firstPlayerId" ? "선공" : "후공"}{" "}
-            <select value={match[side] ?? ""} onChange={(e) => linkPlayer(side, e.target.value)}>
-              <option value="">선수 미지정</option>
-              {players.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.targetHandicap !== null ? ` (목표 ${p.targetHandicap})` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-        ))}
-        <Link href="/players">선수 관리</Link>
-      </div>
 
       <div className={styles.viewToggle} role="radiogroup" aria-label="보기">
         {(
@@ -231,7 +208,7 @@ export default function MatchDetail() {
           role="tab"
           aria-selected={tab === "shots"}
           className={styles.tab}
-          onClick={() => setTab("shots")}
+          onClick={() => openTab("shots")}
         >
           샷 목록 {order.length}
         </button>
@@ -240,7 +217,7 @@ export default function MatchDetail() {
           role="tab"
           aria-selected={tab === "feedback"}
           className={styles.tab}
-          onClick={() => setTab("feedback")}
+          onClick={() => openTab("feedback")}
           disabled={!shot}
         >
           {shot ? `${shot.inningNo}이닝 ${shot.shotNoInInning}번째 샷 피드백` : "샷 피드백"}
@@ -251,7 +228,7 @@ export default function MatchDetail() {
           aria-selected={tab === "coaching"}
           className={styles.tab}
           onClick={() => {
-            setTab("coaching");
+            openTab("coaching");
             setView("path"); // 추천 경로를 바로 그림으로 볼 수 있게
           }}
           disabled={!shot}
@@ -262,12 +239,14 @@ export default function MatchDetail() {
 
       {error && <p className={styles.errorLine}>{error}</p>}
 
-      <div className={styles.panel}>
+      <div ref={panelRef} className={styles.panel}>
         {tab === "shots" ? (
           <ShotList
             summary={matchSummaryText(innings)}
             innings={innings}
             selectedId={shotId}
+            filter={filter}
+            onFilter={setFilter}
             onPick={(id) => {
               setError(null);
               setShotId(id);
@@ -276,7 +255,8 @@ export default function MatchDetail() {
         ) : tab === "coaching" ? (
           shot && (
             <CoachingPanel
-              key={`${shot.id}-${match.firstPlayerId}-${match.secondPlayerId}`}
+              // 인정·불인정·쫑을 바꾸면 그 결과로 코칭을 바로 다시 받는다
+              key={`${shot.id}-${shot.scoreConfirmed}-${shot.kissObserved}`}
               shotId={shot.id}
               selectedRank={route?.rank ?? null}
               onSelect={(r) => setPicked({ shotId: shot.id, route: r })}

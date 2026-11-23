@@ -24,8 +24,8 @@ type Props = {
 export default function ShotFeedback({ shot, saving, onConfirm, onKiss, onPrev, onNext }: Props) {
   const cushions = scoringCushions(shot);
   const first = shot.hitOrder?.[0] ?? null;
-  // 자동 판정이 끝난 샷은 모두 사람이 바로잡을 수 있다
-  const showConfirm = shot.scoredBy !== "none";
+  // 자동 판정을 못 한 샷도 사람이 정하면 바로 코칭을 받을 수 있다
+  const autoFailed = shot.scoredBy === "none";
 
   return (
     <div className={styles.feedback}>
@@ -78,31 +78,33 @@ export default function ShotFeedback({ shot, saving, onConfirm, onKiss, onPrev, 
         ))}
       </ul>
 
-      {showConfirm && (
-        <div className={styles.confirm}>
-          <p className={styles.confirmHint}>자동 판정이 틀렸다면 바로잡아 주세요. 다시 누르면 자동 판정으로 돌아갑니다.</p>
-          <div className={styles.confirmButtons}>
-            <button
-              type="button"
-              className={styles.accept}
-              aria-pressed={shot.scoreConfirmed === true}
-              disabled={saving}
-              onClick={() => onConfirm(true)}
-            >
-              인정
-            </button>
-            <button
-              type="button"
-              className={styles.reject}
-              aria-pressed={shot.scoreConfirmed === false}
-              disabled={saving}
-              onClick={() => onConfirm(false)}
-            >
-              불인정
-            </button>
-          </div>
+      <div className={styles.confirm}>
+        <p className={styles.confirmHint}>
+          {autoFailed
+            ? "자동 판정을 못 한 샷입니다. 영상을 보고 인정·불인정을 골라 주세요. 고르면 코칭 탭에 바로 반영됩니다."
+            : "자동 판정이 틀렸다면 바로잡아 주세요. 고르면 코칭 탭에 바로 반영되고, 다시 누르면 자동 판정으로 돌아갑니다."}
+        </p>
+        <div className={styles.confirmButtons}>
+          <button
+            type="button"
+            className={styles.accept}
+            aria-pressed={shot.scoreConfirmed === true}
+            disabled={saving}
+            onClick={() => onConfirm(true)}
+          >
+            인정
+          </button>
+          <button
+            type="button"
+            className={styles.reject}
+            aria-pressed={shot.scoreConfirmed === false}
+            disabled={saving}
+            onClick={() => onConfirm(false)}
+          >
+            불인정
+          </button>
         </div>
-      )}
+      </div>
 
       {/* 쫑 기록: 사람이 영상으로 본 값. 쫑 예측을 다시 맞출 정답으로 모은다 */}
       <div className={styles.confirm}>
