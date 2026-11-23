@@ -14,6 +14,6 @@
 | 앱 디자인 | [app-design](app-design.md) | 휴대폰 웹 7개 화면 시안, 스플래시, 경기 목록·상세 화면 API 연결, 경로 그림·코칭 탭·선수 관리, 당점·두께·세기 그림, 코칭 그림 선 켜고 끄기, 앱 아이콘 엠블럼, 스플래시 수정, 레벨·선수 관리 제거, 샷 목록 나누기, 내 경기 업로드 화면 | 2026-11-23 |
 | 작업 규칙 | [work-rules](work-rules.md) | 저장 위치, 문서 표현, worklog 방식 | 2026-11-02 |
 | 기술 결정 | [tech-decisions](tech-decisions.md) | Next.js, NestJS, Python 분석, SQLite, 3쿠션, 1~2시간 영상 자동 정리 | 2026-11-02 |
-| 기획 문서 | [planning-docs](planning-docs.md) | 기획서 8장과 기술스택 문서 작성 | 2026-10-19 |
-| 사업소개서 | [business-deck](business-deck.md) | v3까지 리디자인, HTML과 PPTX 2종 | 2026-10-19 |
+| 기획 문서 | [planning-docs](planning-docs.md) | 기획서 8장과 기술스택 문서 작성, 사업계획서 | 2026-11-23 |
+| 사업소개서 | [business-deck](business-deck.md) | v3까지 리디자인, AI 샷 코칭 발표 자료(HTML·PPTX)와 대본 | 2026-11-23 |
 | 참고 자료 | [references](references.md) | 기업 IR PDF 5개 수집 | 2026-10-19 |
