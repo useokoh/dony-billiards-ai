@@ -1,5 +1,10 @@
 # 개발 환경
 
+## 2026-11-23 학교 컴퓨터용 시연 폴더
+- 결정과 이유: 교수님이 라이브 시연을 학교 컴퓨터에서 하라고 했고, 학교 PC 브라우저로 맥북 서버에 접속하는 방법은 안 된다(사용자 확인). 그래서 학교 PC 안에서 서버를 켜는 폴더를 만든다. 학교 PC에는 Node.js만 있으면 된다.
+- 한 일: `billiards-ai/demo/`에 `make-demo-bundle.sh`(커밋된 코드 + DB 사본 + 샷 영상 + route_model.json + api/.env → `Project/시연용_당구AI/`, 약 600MB), `start-demo.bat`(Windows, CRLF), `start-demo.command`(Mac), `사용법.txt`를 만들었다. 실행 파일은 처음 한 번 `npm ci`(실패 시 `npm install`) → `prisma generate` → 빌드를 하고, 이후에는 API(4000)와 `next start`(3000)를 켜서 브라우저를 연다. 관리자 권한이 없으면 Node zip을 폴더 안 `node/`에 풀어 쓰게 했다. 설명은 `Docs/시연환경_설정.md`.
+- 확인 결과: 폴더를 새로 복사해 Mac 실행 파일로 처음부터 설치·빌드·실행 → 화면 200, 경기 2개, 1이닝 6번째 샷 교정, 샷 영상 200 확인. **Windows에서는 확인 못 함**(맥에서 만든 package-lock의 Windows용 선택 패키지 설치, 한글 경로, bat의 한글 출력은 실제 PC에서 확인 필요). 영상 올리기는 Python이 없어 분석 단계에서 실패하므로 화면만 보여 주기로 함.
+
 ## 2026-11-09 저장소 공개 전환과 커밋 이메일 변경
 - 한 일: 사용자 요청으로 `dony-billiards-ai`를 공개(Public)로 바꿨다. 이어서 커밋 3개의 작성자 이메일을 GitHub noreply 주소(`277463901+useokoh@users.noreply.github.com`)로 바꿔 덮어썼다(force push).
 - 결정과 이유: 공개 전 점검에서 실제 키·비밀번호는 없었다(걸린 것은 Prisma 설명서 예시뿐). 사용자는 이메일·창업기획서·worklog 공개를 알고 "그대로 공개"를 골랐고, 이후 이메일만 숨기기로 했다.
