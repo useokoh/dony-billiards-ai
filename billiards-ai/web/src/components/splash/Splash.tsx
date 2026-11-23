@@ -72,10 +72,19 @@ export default function Splash() {
     let seen = false;
     try {
       seen = sessionStorage.getItem(SPLASH_KEY) !== null;
-      sessionStorage.setItem(SPLASH_KEY, "1");
     } catch {
       // 저장소를 못 쓰는 환경(사생활 보호 모드 등)이면 매번 보여 준다
     }
+    // 본 기록은 끝났을 때 남긴다. 시작할 때 남기면 개발 모드에서 효과가 두 번 실행될 때
+    // 두 번째 실행이 "이미 봤다"로 보고 애니메이션 없이 검은 화면만 남는다.
+    const finish = () => {
+      try {
+        sessionStorage.setItem(SPLASH_KEY, "1");
+      } catch {
+        // 저장 못 하면 다음에 또 보여 줄 뿐이다
+      }
+      setDone(true);
+    };
     // 이미 봤으면 <head> 스크립트가 붙인 data-splash="done"으로 CSS가 숨겨 둔 상태다.
     if (seen) return;
 
@@ -149,7 +158,7 @@ export default function Splash() {
       if (skipAt.current !== null) {
         const k = seg(now, skipAt.current, SKIP_FADE_MS);
         rootRef.current!.style.opacity = String(1 - k);
-        if (k >= 1) return setDone(true);
+        if (k >= 1) return finish();
         raf = requestAnimationFrame(tick);
         return;
       }
@@ -158,10 +167,10 @@ export default function Splash() {
         // 움직임 없이 완성된 로고만 보여 주고 서서히 사라진다
         render(T.zoom.start);
         rootRef.current!.style.opacity = String(1 - seg(elapsed, REDUCED_HOLD_MS, 400));
-        if (elapsed >= REDUCED_HOLD_MS + 400) return setDone(true);
+        if (elapsed >= REDUCED_HOLD_MS + 400) return finish();
       } else {
         render(elapsed);
-        if (elapsed >= T.end) return setDone(true);
+        if (elapsed >= T.end) return finish();
       }
       raf = requestAnimationFrame(tick);
     };

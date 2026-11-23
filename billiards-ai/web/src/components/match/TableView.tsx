@@ -36,6 +36,9 @@ export default function TableView({ trajectory, route, loading }: Props) {
   const routePts = route?.points ?? null;
   const [off, setOff] = useState<Layer[]>([]);
   const show = (l: Layer) => !off.includes(l);
+  // 그릴 수 있는 선만 버튼으로 보여 준다 (배치가 없는 추천 경로는 점선 좌표가 없다)
+  const projected = Boolean(route?.comparison && route.executionHint?.firstObjectBall);
+  const has: Record<Layer, boolean> = { actual: true, route: Boolean(routePts), object: projected, stop: projected };
   const toggle = (l: Layer) => setOff((o) => (o.includes(l) ? o.filter((x) => x !== l) : [...o, l]));
   return (
     <figure className={styles.table}>
@@ -160,9 +163,9 @@ export default function TableView({ trajectory, route, loading }: Props) {
               ? "실선: 실제 경로 · 파란 점선: 추천 경로 · 숫자: 쿠션 순서 · 공 색 점선: 1적구 예상 진행 · 점선 원: 예상 정지 위치"
               : "실선: 실제 경로 · 진한 공: 시작 위치 · 옅은 공: 멈춘 위치"}
       </figcaption>
-      {routePts && balls && (
+      {route && balls && (
         <div className={styles.layerToggle} role="group" aria-label="그림에 표시할 선">
-          {LAYERS.map((l) => (
+          {LAYERS.filter((l) => has[l.key]).map((l) => (
             <button
               key={l.key}
               type="button"
