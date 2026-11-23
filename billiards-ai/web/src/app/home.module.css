@@ -95,6 +95,9 @@
   background: var(--line);
   overflow: hidden;
 }
+.job > .jobAction {
+  align-self: flex-start;
+}
 .bar > span {
   display: block;
   height: 100%;
@@ -102,7 +105,6 @@
   transition: width 0.3s;
 }
 .jobAction {
-  align-self: flex-start;
   min-height: 36px;
   padding: 0 14px;
   display: flex;
@@ -124,6 +126,41 @@
 }
 
 /* 지난 경기 한 줄: 경기 링크 + 삭제 버튼 */
+.rowGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.confirmDelete {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--warn);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--soft);
+}
+.confirmDelete b {
+  color: var(--foreground);
+}
+.confirmButtons {
+  display: flex;
+  gap: 8px;
+}
+.dangerButton {
+  min-height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--warn);
+  color: #1a1206;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
 .rowWrap {
   display: flex;
   gap: 6px;

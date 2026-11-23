@@ -22,6 +22,8 @@ export default function MatchListPage() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [dragging, setDragging] = useState(false);
   const [deleting, setDeleting] = useState<number | null>(null);
+  // 삭제 확인을 묻는 중인 경기. 브라우저 confirm 창은 앱 안 브라우저 등에서 열리지 않고 바로 취소돼 화면 안에서 묻는다
+  const [asking, setAsking] = useState<number | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
   const loadMatches = useCallback(() => {
@@ -64,8 +66,7 @@ export default function MatchListPage() {
   }, [jobId, jobStatus, loadMatches]);
 
   async function remove(m: MatchSummary) {
-    const when = `${formatPlayedAt(m.playedAt)} · ${m.table.name}`;
-    if (!window.confirm(`${when} 경기를 삭제할까요?\n원본 영상과 샷 영상, 분석 결과, 인정·쫑 기록이 모두 지워지며 되돌릴 수 없습니다.`)) return;
+    setAsking(null);
     setDeleting(m.id);
     try {
       await api.deleteMatch(m.id);
@@ -149,7 +150,8 @@ export default function MatchListPage() {
         {matches?.length === 0 && <p className={styles.notice}>아직 분석한 경기가 없습니다. 위에서 영상을 올려 보세요.</p>}
 
         {matches?.map((m) => (
-          <div key={m.id} className={styles.rowWrap}>
+          <div key={m.id} className={styles.rowGroup}>
+          <div className={styles.rowWrap}>
           <Link href={`/matches/${m.id}`} className={styles.row}>
             <span className={styles.rowMain}>
               <span className={styles.rowTitle}>
@@ -177,8 +179,9 @@ export default function MatchListPage() {
             type="button"
             className={styles.rowDelete}
             aria-label={`${formatPlayedAt(m.playedAt)} 경기 삭제`}
+            aria-expanded={asking === m.id}
             disabled={deleting !== null}
-            onClick={() => void remove(m)}
+            onClick={() => setAsking(asking === m.id ? null : m.id)}
           >
             {deleting === m.id ? (
               "…"
@@ -188,6 +191,24 @@ export default function MatchListPage() {
               </svg>
             )}
           </button>
+          </div>
+          {asking === m.id && (
+            <div className={styles.confirmDelete} role="alertdialog" aria-label="경기 삭제 확인">
+              <p>
+                <b>{formatPlayedAt(m.playedAt)} 경기를 삭제할까요?</b>
+                <br />
+                원본 영상과 샷 영상, 분석 결과, 인정·쫑 기록이 모두 지워지며 되돌릴 수 없습니다.
+              </p>
+              <div className={styles.confirmButtons}>
+                <button type="button" className={styles.dangerButton} onClick={() => void remove(m)}>
+                  삭제
+                </button>
+                <button type="button" className={styles.jobAction} onClick={() => setAsking(null)}>
+                  취소
+                </button>
+              </div>
+            </div>
+          )}
           </div>
         ))}
       </main>
