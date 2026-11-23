@@ -1,7 +1,11 @@
 import { NotFoundException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { BadRequestException } from '@nestjs/common';
-import { MatchesService, parseMatchPlayersBody } from './matches.service.js';
+import {
+  matchFiles,
+  MatchesService,
+  parseMatchPlayersBody,
+} from './matches.service.js';
 
 describe('MatchesService', () => {
   const row = {
@@ -133,5 +137,32 @@ describe('MatchesService.setPlayers', () => {
       firstPlayer: '도니',
       secondPlayer: '상대',
     });
+  });
+});
+
+describe('matchFiles', () => {
+  const root = '/proj';
+  it('lists the video and every result named after it', () => {
+    expect(
+      matchFiles(root, 'data/videos/game_1.MP4', [
+        'game_1_middle.jpg',
+        'game_10_middle.jpg',
+        'clip_test.mp4',
+      ]),
+    ).toEqual([
+      '/proj/data/videos/game_1.MP4',
+      '/proj/data/results/clips/game_1',
+      '/proj/data/results/detect/game_1',
+      '/proj/data/results/tracks/game_1',
+      '/proj/data/results/shots/game_1.json',
+      '/proj/data/results/trajectories/game_1.json',
+      '/proj/data/results/check/game_1_middle.jpg',
+    ]);
+  });
+
+  it('never returns paths outside data/', () => {
+    const files = matchFiles(root, '../secret/x.mp4');
+    expect(files.every((f) => f.startsWith('/proj/data/'))).toBe(true);
+    expect(files).not.toContain('/secret/x.mp4');
   });
 });

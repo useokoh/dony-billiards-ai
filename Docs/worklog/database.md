@@ -1,5 +1,11 @@
 # 데이터베이스
 
+## 2026-11-23 경기(영상) 삭제 API와 화면
+- 한 일: `DELETE /api/matches/:id`를 만들었다. DB에서 경기를 지우면 이닝·샷·사건·궤적·클립·피드백이 함께 지워진다(Cascade). 이어서 같은 영상 이름으로 된 파일(`data/videos` 원본, `results/clips·detect·tracks` 폴더, `results/shots·trajectories` JSON, `results/check/<이름>_*.jpg`)을 지운다. 내 경기 화면 각 줄 오른쪽에 휴지통 버튼을 두고, 누르면 "되돌릴 수 없다"는 확인 창을 띄운다.
+- 결정과 이유: 지울 경로는 `matchFiles()`로 모으고 `data/` 밖 경로는 걸러 낸다. 같은 영상을 쓰는 다른 경기가 있으면 파일은 남기고 DB만 지운다.
+- 바뀐 파일: `api/src/matches/matches.{service,controller}.ts`(+spec), `web/src/app/page.tsx`, `home.module.css`, `web/src/lib/api.ts`
+- 확인 결과: API 테스트 165개 통과. 임시 폴더 + DB 사본으로 띄운 서버에서 경기 7 삭제 → 파일 7개 삭제, 다른 경기 영상·무관한 파일은 남음, 고아 행 0개, 다시 지우면 404. 화면에서는 확인 창 취소만 시험(실제 DB 경기 2개 그대로). 실제 DB에서 지우기는 하지 않음.
+
 ## 2026-11-16 내가 친 경로 교정 코칭 (A안)
 - 한 일: `api/src/coaching/played-route.ts`(친 경로 측정), `route-geometry.ts`의 `planCorrection`, `route-rules.ts`의 `buildCorrection`·`easierThan`을 만들고, 경로 응답에 `playedRoute`를 추가했다. 다른 경로는 교정보다 쉬울 때만 남긴다. 웹 코칭 탭에 "내가 친 경로 교정" 카드를 맨 위에 넣었다.
 - 확인 결과: API 테스트 163개, lint 0, 웹 빌드·lint 통과. 실제 샷 219개 측정: 득점 샷 97개에서 실제 두께와 모델 득점 두께 차이 중앙값 0.2°, 실패 샷 84개 중 52개 교정 가능(차이 중앙값 13°), 쿠션 먼저 맞힌 샷 32개는 측정 제외.

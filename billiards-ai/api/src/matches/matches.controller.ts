@@ -2,6 +2,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -53,6 +54,15 @@ export class MatchesController {
   @ApiOperation({ summary: '이닝별 샷 목록 (결과, 쿠션 횟수)' })
   innings(@Param('id', ParseIntPipe) id: number) {
     return this.matches.innings(id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary:
+      '경기 삭제: DB 기록과 원본 영상·분석 결과 파일을 함께 지운다 (되돌릴 수 없음)',
+  })
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.matches.remove(id);
   }
 
   @Get(':id/video')

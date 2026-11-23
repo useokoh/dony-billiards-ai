@@ -21,6 +21,7 @@ export default function MatchListPage() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [deleting, setDeleting] = useState<number | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
   const loadMatches = useCallback(() => {
@@ -61,6 +62,20 @@ export default function MatchListPage() {
     }, POLL_MS);
     return () => clearInterval(timer);
   }, [jobId, jobStatus, loadMatches]);
+
+  async function remove(m: MatchSummary) {
+    const when = `${formatPlayedAt(m.playedAt)} · ${m.table.name}`;
+    if (!window.confirm(`${when} 경기를 삭제할까요?\n원본 영상과 샷 영상, 분석 결과, 인정·쫑 기록이 모두 지워지며 되돌릴 수 없습니다.`)) return;
+    setDeleting(m.id);
+    try {
+      await api.deleteMatch(m.id);
+      setMatches((list) => list?.filter((x) => x.id !== m.id) ?? null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   async function start(file: File | undefined) {
     if (!file) return;
@@ -134,7 +149,8 @@ export default function MatchListPage() {
         {matches?.length === 0 && <p className={styles.notice}>아직 분석한 경기가 없습니다. 위에서 영상을 올려 보세요.</p>}
 
         {matches?.map((m) => (
-          <Link key={m.id} href={`/matches/${m.id}`} className={styles.row}>
+          <div key={m.id} className={styles.rowWrap}>
+          <Link href={`/matches/${m.id}`} className={styles.row}>
             <span className={styles.rowMain}>
               <span className={styles.rowTitle}>
                 {formatPlayedAt(m.playedAt)} · {m.table.name}
@@ -157,6 +173,22 @@ export default function MatchListPage() {
               {m.scoreFirst}:{m.scoreSecond}
             </span>
           </Link>
+          <button
+            type="button"
+            className={styles.rowDelete}
+            aria-label={`${formatPlayedAt(m.playedAt)} 경기 삭제`}
+            disabled={deleting !== null}
+            onClick={() => void remove(m)}
+          >
+            {deleting === m.id ? (
+              "…"
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
+              </svg>
+            )}
+          </button>
+          </div>
         ))}
       </main>
 

@@ -1,9 +1,12 @@
-// 경기 조회: 경기 목록, 경기 정보, 이닝별 샷 요약
+// 경기 조회: 경기 목록, 경기 정보, 이닝별 샷 요약, 경기 삭제
+import { readdirSync, rmSync } from 'node:fs';
+import { basename, extname, join, resolve, sep } from 'node:path';
 import {
   BadRequestException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { projectRoot } from '../media/media-file.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { isScored, scoreSource } from '../scoring/score.js';
 
@@ -87,6 +90,33 @@ export function parseMatchPlayersBody(body: unknown): MatchPlayersInput {
   return out;
 }
 
+/**
+ * 경기 하나가 data/ 아래에 남기는 파일들 (분석 결과는 영상 이름을 그대로 쓴다).
+ * data/ 밖을 가리키는 경로는 지우지 않도록 걸러 낸다.
+ */
+export function matchFiles(
+  root: string,
+  videoPath: string,
+  checkFiles: string[] = [],
+): string[] {
+  const data = resolve(root, 'data') + sep;
+  const stem = basename(videoPath, extname(videoPath));
+  const paths = [
+    videoPath,
+    `data/results/clips/${stem}`,
+    `data/results/detect/${stem}`,
+    `data/results/tracks/${stem}`,
+    `data/results/shots/${stem}.json`,
+    `data/results/trajectories/${stem}.json`,
+    ...checkFiles
+      .filter((f) => f.startsWith(`${stem}_`))
+      .map((f) => `data/results/check/${f}`),
+  ];
+  return paths
+    .map((p) => resolve(root, p))
+    .filter((p) => p.startsWith(data) && basename(p) !== '');
+}
+
 @Injectable()
 export class MatchesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -128,6 +158,33 @@ export class MatchesService {
       candidateCount: candidateCount.get(m.id) ?? 0,
       reviewCount: reviewCount.get(m.id) ?? 0,
     }));
+  }
+
+  /**
+   * 경기 삭제: DB 기록(이닝·샷·궤적·피드백은 함께 지워짐)과 원본 영상·분석 결과 파일을 지운다.
+   * 되돌릴 수 없으므로 화면에서 한 번 더 묻는다.
+   */
+  async remove(id: number) {
+    const m = await this.prisma.match.findUnique({
+      where: { id },
+      select: { videoPath: true },
+    });
+    if (!m) throw new NotFoundException(`경기 ${id}이 없습니다`);
+    // 같은 영상을 쓰는 다른 경기가 있으면 파일은 남긴다 (DB만 지움)
+    const shared = await this.prisma.match.count({
+      where: { videoPath: m.videoPath, id: { not: id } },
+    });
+    await this.prisma.match.delete({ where: { id } });
+    const root = projectRoot();
+    let check: string[] = [];
+    try {
+      check = readdirSync(join(root, 'data/results/check'));
+    } catch {
+      // 확인용 이미지 폴더가 없으면 지울 것도 없다
+    }
+    const files = shared ? [] : matchFiles(root, m.videoPath, check);
+    for (const f of files) rmSync(f, { recursive: true, force: true });
+    return { id, deletedFiles: files.length };
   }
 
   /** 경기 1개: 요약 + 영상 길이, fps, 오류 내용, 영상 주소 */

@@ -228,6 +228,8 @@ export const api = {
   coachingFeedback: (id: number, level?: CoachingLevel) =>
     request<FeedbackResponse>(`/shots/${id}/feedback${level ? `?level=${level}` : ""}`),
   uploadJob: (id: string) => request<UploadJob>(`/uploads/${id}`),
+  /** 경기 삭제: DB 기록과 원본 영상·분석 결과 파일을 함께 지운다 (되돌릴 수 없음) */
+  deleteMatch: (id: number) => request<{ id: number; deletedFiles: number }>(`/matches/${id}`, { method: "DELETE" }),
 };
 
 /**
